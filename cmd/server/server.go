@@ -1,0 +1,46 @@
+package main
+
+import (
+	"log"
+
+	"os"
+
+	"realworld-backend-go/internal/adapters/in/webserver"
+	"realworld-backend-go/internal/adapters/out/db"
+	"realworld-backend-go/internal/domain"
+
+	"github.com/joho/godotenv"
+)
+
+func main() {
+	// load configs
+	err := godotenv.Load()
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	// Setup all dependencies
+	database, err := db.New(&db.DBConfig{
+		Host:     os.Getenv("DB_HOST"),
+		Port:     os.Getenv("DB_PORT"),
+		User:     os.Getenv("DB_USER"),
+		Password: os.Getenv("DB_PASSWORD"),
+		Name:     os.Getenv("DB_NAME"),
+	})
+	if err != nil {
+		log.Fatal(err)
+	}
+	userController := domain.New(database)
+	handlers := webserver.NewHandler(userController)
+
+	port := os.Getenv("SERVER_PORT")
+
+	log.Printf("starting server on port %s...\n", port)
+
+	s, err := webserver.NewServer(port, handlers)
+	if err != nil {
+		log.Fatal(err)
+	}
+
+	s.Start()
+}
