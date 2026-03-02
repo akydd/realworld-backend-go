@@ -2,6 +2,7 @@ package webserver
 
 import (
 	"fmt"
+	"log"
 	"net/http"
 	"os"
 
@@ -32,7 +33,7 @@ func NewServer(port string, h ServerHandlers) (*Server, error) {
 }
 
 func (s *Server) Start() {
-	http.ListenAndServe(fmt.Sprintf(":%s", s.port), s.router)
+	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", s.port), s.router))
 }
 
 func (s *Server) Stop() {

@@ -1,8 +1,8 @@
 package main
 
 import (
+	"flag"
 	"log"
-
 	"os"
 
 	"realworld-backend-go/internal/adapters/in/webserver"
@@ -14,7 +14,9 @@ import (
 
 func main() {
 	// load configs
-	err := godotenv.Load()
+	envFile := flag.String("env", ".env", "path to env file")
+	flag.Parse()
+	err := godotenv.Load(*envFile)
 	if err != nil {
 		log.Fatal(err)
 	}
