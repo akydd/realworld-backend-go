@@ -7,6 +7,7 @@ import (
 
 const (
 	blankFieldErrMsg = "can't be blank"
+	DuplicateErrMsg  = "has already been taken"
 )
 
 type ValidationError struct {
@@ -22,5 +23,21 @@ func NewValidationError(field string, err string) *ValidationError {
 	return &ValidationError{
 		Field:  field,
 		Errors: []string{err},
+	}
+}
+
+type DuplicateError struct {
+	Field string
+	Msg   string
+}
+
+func (d *DuplicateError) Error() string {
+	return fmt.Sprintf("field %s: %s", d.Field, d.Msg)
+}
+
+func NewDuplicateError(field string) *DuplicateError {
+	return &DuplicateError{
+		Field: field,
+		Msg:   DuplicateErrMsg,
 	}
 }

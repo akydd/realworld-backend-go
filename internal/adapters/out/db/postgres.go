@@ -10,7 +10,7 @@ import (
 	"realworld-backend-go/internal/domain"
 
 	"github.com/jmoiron/sqlx"
-	_ "github.com/lib/pq"
+	"github.com/lib/pq"
 	"github.com/pressly/goose/v3"
 )
 
@@ -108,6 +108,15 @@ func (p *Postgres) InsertUser(ctx context.Context, u *domain.RegisterUser) (*dom
 
 	err := p.db.QueryRowxContext(ctx, query, u.Username, u.Email, u.Password).StructScan(&dbUser)
 	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			switch pqErr.Constraint {
+			case "users_email_unique":
+				return nil, domain.NewDuplicateError("email")
+			case "users_username_unique":
+				return nil, domain.NewDuplicateError("username")
+			}
+		}
 		return nil, err
 	}
 

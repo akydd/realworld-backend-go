@@ -65,9 +65,13 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var errResp []byte
 		var validationErr *domain.ValidationError
+		var dupErr *domain.DuplicateError
 		if errors.As(err, &validationErr) {
 			errResp = createErrResponse(validationErr.Field, validationErr.Errors)
 			w.WriteHeader(http.StatusUnprocessableEntity)
+		} else if errors.As(err, &dupErr) {
+			errResp = createErrResponse(dupErr.Field, []string{dupErr.Msg})
+			w.WriteHeader(http.StatusConflict)
 		} else {
 			fmt.Println(err.Error())
 			errResp = createErrResponse("unknown_error", []string{err.Error()})
