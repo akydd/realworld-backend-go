@@ -23,8 +23,9 @@ realworld-backend-go/
 │           └── migrations/
 │               ├── 001_create_users.sql
 │               └── 002_unique_users.sql
-├── tests/integration/api_test.go     # Integration tests
-├── compose.yaml                      # Docker Compose (prod + test DBs)
+├── compose.yaml                      # Docker Compose (prod DB)
+├── compose.test.yaml                 # Docker Compose (test DB)
+├── Makefile                          # make int-tests runner
 ├── .env                              # Production environment config
 └── .env_test                         # Test environment config
 ```
@@ -79,7 +80,6 @@ PostgreSQL persistence via `sqlx`:
 | `alexedwards/argon2id` | Password hashing |
 | `golang-jwt/jwt/v5` | JWT token generation (HS256) |
 | `joho/godotenv` | `.env` file loading |
-| `stretchr/testify` | Test assertions |
 
 ## Configuration
 
@@ -97,19 +97,23 @@ Loaded from `.env` / `.env_test` via `godotenv`:
 
 ## Infrastructure (Docker)
 
-`compose.yaml` defines two PostgreSQL containers:
-- **`db`** (port 8095): Production database, volume `app-data`
-- **`test_db`** (port 8096): Test database, volume `app-test-data`
+Docker Compose is split into two files:
+- **`compose.yaml`**: Production database (`db`, port 8095, volume `app-data`)
+- **`compose.test.yaml`**: Test database (`test_db`, port 8096, volume `app-test-data`)
 
 Migrations run automatically at app startup via embedded Goose files.
 
 ## Testing
 
-Integration tests in `tests/integration/api_test.go`:
-- Load `.env_test` config
-- Connect to the test PostgreSQL container
-- Start an `httptest.Server` with the full handler stack
-- Send real HTTP requests and assert responses
+Integration tests are run via `make int-tests`, which:
+1. Starts the test DB (`compose.test.yaml`)
+2. Polls `pg_isready` until the DB is accepting connections
+3. Builds the binary (`go build ./cmd/server`)
+4. Starts the server with the test env (`./server -env .env_test`)
+5. Runs the hurl API test suite (`../realworld/specs/api/run-api-tests-hurl.sh`)
+6. Truncates the `users` table and stops the test DB container
+
+The server accepts a `-env` flag (default `.env`) to select the env file at startup.
 
 ## Current State
 
