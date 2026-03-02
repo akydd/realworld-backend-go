@@ -30,7 +30,7 @@ func main() {
 	if err != nil {
 		log.Fatal(err)
 	}
-	userController := domain.New(database)
+	userController := domain.New(database, os.Getenv("JWT_SECRET"))
 	handlers := webserver.NewHandler(userController)
 
 	port := os.Getenv("SERVER_PORT")
