@@ -51,6 +51,7 @@ Handles the HTTP protocol layer:
 |--------|------|-------------|
 | POST | `/api/users` | Register a new user |
 | POST | `/api/users/login` | Log in an existing user |
+| GET | `/api/user` | Get the authenticated user |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
 
@@ -60,6 +61,7 @@ PostgreSQL persistence via `sqlx`:
 - Parameterized queries to prevent SQL injection.
 - `InsertUser()` inserts a user and returns the created record via `RETURNING`. Detects PostgreSQL unique-violation errors (code `23505`) and maps them to `*domain.DuplicateError` by constraint name.
 - `GetUserByEmail()` fetches a user and their hashed password by email. Returns `*domain.CredentialsError` when no row is found.
+- `GetUserByUsername()` fetches a user by username. Returns `*domain.CredentialsError` when no row is found.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -120,7 +122,8 @@ The server accepts a `-env` flag (default `.env`) to select the env file at star
 
 ## Current State
 
-The project implements user **registration** and **login**. Notable gaps:
+The project implements user **registration**, **login**, and **get current user**. Notable gaps:
 - Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=username, 72h expiry).
+- `GET /api/user` validates the JWT from the `Authorization: Token {jwt}` header, looks up the user by username, and returns a fresh token.
 - No authentication middleware for protected routes.
 - Articles, comments, and other RealWorld endpoints are not yet built.

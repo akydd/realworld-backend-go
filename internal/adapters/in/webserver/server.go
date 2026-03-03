@@ -18,12 +18,14 @@ type Server struct {
 type ServerHandlers interface {
 	RegisterUser(http.ResponseWriter, *http.Request)
 	LoginUser(http.ResponseWriter, *http.Request)
+	GetUser(http.ResponseWriter, *http.Request)
 }
 
 func NewServer(port string, h ServerHandlers) (*Server, error) {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/users", h.RegisterUser).Methods("POST")
 	r.HandleFunc("/api/users/login", h.LoginUser).Methods("POST")
+	r.HandleFunc("/api/user", h.GetUser).Methods("GET")
 
 	// logging!
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)

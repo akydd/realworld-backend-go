@@ -107,6 +107,22 @@ func convertUser(u user) domain.User {
 	return d
 }
 
+func (p *Postgres) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
+	query := "SELECT username, email, bio, image FROM users WHERE username = $1"
+	var dbUser user
+
+	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.CredentialsError{}
+		}
+		return nil, err
+	}
+
+	u := convertUser(dbUser)
+	return &u, nil
+}
+
 func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.User, string, error) {
 	query := "SELECT username, email, bio, image, password FROM users WHERE email = $1"
 	var dbUser userWithPassword

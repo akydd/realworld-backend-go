@@ -7,11 +7,13 @@ import (
 	"fmt"
 	"net/http"
 	"realworld-backend-go/internal/domain"
+	"strings"
 )
 
 type userService interface {
 	RegisterUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error)
 	LoginUser(ctx context.Context, u *domain.LoginUser) (*domain.User, error)
+	GetUser(ctx context.Context, token string) (*domain.User, error)
 }
 
 type Handler struct {
@@ -128,6 +130,40 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 		_, _ = w.Write(errResp)
+		return
+	}
+
+	resp := UserResponse{
+		User: UserResponseInner(*user),
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	w.Header().Set("Content-Type", "application/json")
+
+	const prefix = "Token "
+	if authHeader == "" || !strings.HasPrefix(authHeader, prefix) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write(createErrResponse("token", []string{"is missing"}))
+		return
+	}
+
+	rawToken := strings.TrimPrefix(authHeader, prefix)
+
+	user, err := h.service.GetUser(r.Context(), rawToken)
+	if err != nil {
+		var credErr *domain.CredentialsError
+		if errors.As(err, &credErr) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
 		return
 	}
 
