@@ -85,6 +85,11 @@ type user struct {
 	Image    sql.NullString `db:"image"`
 }
 
+type userWithPassword struct {
+	user
+	Password string `db:"password"`
+}
+
 func convertUser(u user) domain.User {
 	d := domain.User{
 		Username: u.Username,
@@ -100,6 +105,22 @@ func convertUser(u user) domain.User {
 	}
 
 	return d
+}
+
+func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.User, string, error) {
+	query := "SELECT username, email, bio, image, password FROM users WHERE email = $1"
+	var dbUser userWithPassword
+
+	err := p.db.QueryRowxContext(ctx, query, email).StructScan(&dbUser)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", &domain.CredentialsError{}
+		}
+		return nil, "", err
+	}
+
+	user := convertUser(dbUser.user)
+	return &user, dbUser.Password, nil
 }
 
 func (p *Postgres) InsertUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error) {

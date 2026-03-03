@@ -41,3 +41,9 @@ func NewDuplicateError(field string) *DuplicateError {
 		Msg:   DuplicateErrMsg,
 	}
 }
+
+type CredentialsError struct{}
+
+func (c *CredentialsError) Error() string {
+	return "invalid credentials"
+}
