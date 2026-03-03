@@ -10,6 +10,7 @@ import (
 
 type userRepo interface {
 	InsertUser(ctx context.Context, u *RegisterUser) (*User, error)
+	GetUserByEmail(ctx context.Context, email string) (*User, string, error)
 }
 
 type UserController struct {
@@ -56,6 +57,36 @@ func generateToken(username string, secret string) (string, error) {
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
+}
+
+func (c *UserController) LoginUser(ctx context.Context, u *LoginUser) (*User, error) {
+	if u.Email == "" {
+		return nil, NewValidationError("email", blankFieldErrMsg)
+	}
+	if u.Password == "" {
+		return nil, NewValidationError("password", blankFieldErrMsg)
+	}
+
+	user, hashedPassword, err := c.repo.GetUserByEmail(ctx, u.Email)
+	if err != nil {
+		return nil, err
+	}
+
+	match, err := argon2id.ComparePasswordAndHash(u.Password, hashedPassword)
+	if err != nil {
+		return nil, err
+	}
+	if !match {
+		return nil, &CredentialsError{}
+	}
+
+	token, err := generateToken(user.Username, c.jwtSecret)
+	if err != nil {
+		return nil, err
+	}
+	user.Token = token
+
+	return user, nil
 }
 
 func validateRegisterUser(r *RegisterUser) error {

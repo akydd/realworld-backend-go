@@ -11,6 +11,7 @@ import (
 
 type userService interface {
 	RegisterUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error)
+	LoginUser(ctx context.Context, u *domain.LoginUser) (*domain.User, error)
 }
 
 type Handler struct {
@@ -21,6 +22,15 @@ func NewHandler(s userService) *Handler {
 	return &Handler{
 		service: s,
 	}
+}
+
+type LoginUserInner struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
+}
+
+type LoginUserRequest struct {
+	User LoginUserInner `json:"user"`
 }
 
 type RegisterUserInner struct {
@@ -86,6 +96,45 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 		User: UserResponseInner(*user),
 	}
 	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
+	var req LoginUserRequest
+	err := json.NewDecoder(r.Body).Decode(&req)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	d := domain.LoginUser(req.User)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	user, err := h.service.LoginUser(r.Context(), &d)
+	if err != nil {
+		var errResp []byte
+		var validationErr *domain.ValidationError
+		var credErr *domain.CredentialsError
+		if errors.As(err, &validationErr) {
+			errResp = createErrResponse(validationErr.Field, validationErr.Errors)
+			w.WriteHeader(http.StatusUnprocessableEntity)
+		} else if errors.As(err, &credErr) {
+			errResp = createErrResponse("credentials", []string{"invalid"})
+			w.WriteHeader(http.StatusUnauthorized)
+		} else {
+			fmt.Println(err.Error())
+			errResp = createErrResponse("unknown_error", []string{err.Error()})
+			w.WriteHeader(http.StatusInternalServerError)
+		}
+		_, _ = w.Write(errResp)
+		return
+	}
+
+	resp := UserResponse{
+		User: UserResponseInner(*user),
+	}
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 

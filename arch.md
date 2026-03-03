@@ -38,6 +38,7 @@ Pure Go with no framework dependencies. Contains:
 - **`userRepo` interface**: Decouples domain from persistence. The DB adapter implements this.
 - **`ValidationError`**: Structured field-level validation errors for HTTP consumers.
 - **`DuplicateError`**: Error type returned when a unique constraint is violated. Carries the `Field` name and a fixed message (`"has already been taken"`).
+- **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
 
 ### Inbound Adapter — HTTP (`internal/adapters/in/webserver/`)
 Handles the HTTP protocol layer:
@@ -49,14 +50,16 @@ Handles the HTTP protocol layer:
 | Method | Path | Description |
 |--------|------|-------------|
 | POST | `/api/users` | Register a new user |
+| POST | `/api/users/login` | Log in an existing user |
 
-**Response codes:** `201 Created`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
+**Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
 
 ### Outbound Adapter — Database (`internal/adapters/out/db/`)
 PostgreSQL persistence via `sqlx`:
 - Runs embedded Goose migrations automatically on startup.
 - Parameterized queries to prevent SQL injection.
 - `InsertUser()` inserts a user and returns the created record via `RETURNING`. Detects PostgreSQL unique-violation errors (code `23505`) and maps them to `*domain.DuplicateError` by constraint name.
+- `GetUserByEmail()` fetches a user and their hashed password by email. Returns `*domain.CredentialsError` when no row is found.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -117,7 +120,7 @@ The server accepts a `-env` flag (default `.env`) to select the env file at star
 
 ## Current State
 
-The project implements user **registration** only. Notable gaps:
-- Registered users receive a signed HS256 JWT (claims: `sub`=username, 72h expiry).
+The project implements user **registration** and **login**. Notable gaps:
+- Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=username, 72h expiry).
 - No authentication middleware for protected routes.
-- Only one API endpoint exists; login, articles, comments, etc. are not yet built.
+- Articles, comments, and other RealWorld endpoints are not yet built.
