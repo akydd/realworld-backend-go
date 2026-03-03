@@ -1,4 +1,7 @@
-.PHONY: int-tests
+.PHONY: int-tests lint
+
+lint:
+	golangci-lint run ./...
 
 int-tests:
 	docker compose -f compose.test.yaml up -d

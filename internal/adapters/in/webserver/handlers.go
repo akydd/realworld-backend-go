@@ -78,7 +78,7 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 		}
 
-		w.Write(errResp)
+		_, _ = w.Write(errResp)
 		return
 	}
 
