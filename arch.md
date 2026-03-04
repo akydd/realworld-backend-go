@@ -52,6 +52,7 @@ Handles the HTTP protocol layer:
 | POST | `/api/users` | Register a new user |
 | POST | `/api/users/login` | Log in an existing user |
 | GET | `/api/user` | Get the authenticated user |
+| PUT | `/api/user` | Update the authenticated user |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
 
@@ -62,6 +63,8 @@ PostgreSQL persistence via `sqlx`:
 - `InsertUser()` inserts a user and returns the created record via `RETURNING`. Detects PostgreSQL unique-violation errors (code `23505`) and maps them to `*domain.DuplicateError` by constraint name.
 - `GetUserByEmail()` fetches a user and their hashed password by email. Returns `*domain.CredentialsError` when no row is found.
 - `GetUserByUsername()` fetches a user by username. Returns `*domain.CredentialsError` when no row is found.
+- `GetFullUserByUsername()` fetches a user and their hashed password by username. Returns `*domain.CredentialsError` when no row is found.
+- `UpdateUser()` updates all user fields by current username and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -122,8 +125,9 @@ The server accepts a `-env` flag (default `.env`) to select the env file at star
 
 ## Current State
 
-The project implements user **registration**, **login**, and **get current user**. Notable gaps:
+The project implements user **registration**, **login**, **get current user**, and **update current user**. Notable gaps:
 - Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=username, 72h expiry).
-- `GET /api/user` validates the JWT from the `Authorization: Token {jwt}` header, looks up the user by username, and returns a fresh token.
+- `GET /api/user` and `PUT /api/user` validate the JWT from the `Authorization: Token {jwt}` header.
+- `PUT /api/user` supports partial updates (all fields optional); fetches current values, applies changes, and writes all fields back in one query.
 - No authentication middleware for protected routes.
 - Articles, comments, and other RealWorld endpoints are not yet built.
