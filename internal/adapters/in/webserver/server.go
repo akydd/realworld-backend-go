@@ -26,8 +26,11 @@ func NewServer(port string, h ServerHandlers) (*Server, error) {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/users", h.RegisterUser).Methods("POST")
 	r.HandleFunc("/api/users/login", h.LoginUser).Methods("POST")
-	r.HandleFunc("/api/user", h.GetUser).Methods("GET")
-	r.HandleFunc("/api/user", h.UpdateUser).Methods("PUT")
+
+	protected := r.NewRoute().Subrouter()
+	protected.Use(authMiddleware)
+	protected.HandleFunc("/api/user", h.GetUser).Methods("GET")
+	protected.HandleFunc("/api/user", h.UpdateUser).Methods("PUT")
 
 	// logging!
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)

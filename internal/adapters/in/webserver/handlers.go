@@ -7,7 +7,6 @@ import (
 	"fmt"
 	"net/http"
 	"realworld-backend-go/internal/domain"
-	"strings"
 )
 
 type userService interface {
@@ -175,17 +174,7 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	w.Header().Set("Content-Type", "application/json")
-
-	const prefix = "Token "
-	if authHeader == "" || !strings.HasPrefix(authHeader, prefix) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write(createErrResponse("token", []string{"is missing"}))
-		return
-	}
-
-	rawToken := strings.TrimPrefix(authHeader, prefix)
+	rawToken := r.Context().Value(tokenKey).(string)
 
 	user, err := h.service.GetUser(r.Context(), rawToken)
 	if err != nil {
@@ -209,17 +198,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	authHeader := r.Header.Get("Authorization")
-	w.Header().Set("Content-Type", "application/json")
-
-	const prefix = "Token "
-	if authHeader == "" || !strings.HasPrefix(authHeader, prefix) {
-		w.WriteHeader(http.StatusUnauthorized)
-		_, _ = w.Write(createErrResponse("token", []string{"is missing"}))
-		return
-	}
-
-	rawToken := strings.TrimPrefix(authHeader, prefix)
+	rawToken := r.Context().Value(tokenKey).(string)
 
 	var req UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
