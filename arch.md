@@ -43,7 +43,7 @@ Pure Go with no framework dependencies. Contains:
 ### Inbound Adapter — HTTP (`internal/adapters/in/webserver/`)
 Handles the HTTP protocol layer:
 - **Router**: Gorilla Mux with Gorilla Handlers for Apache-style request logging. Protected routes are grouped in a subrouter with `authMiddleware` applied.
-- **Middleware**: `authMiddleware` extracts the raw JWT from the `Authorization: Token {jwt}` header, returning 401 if missing, and stores it in the request context for protected handlers.
+- **Middleware**: `authMiddleware(jwtSecret)` extracts the JWT from the `Authorization: Token {jwt}` header (401 if missing), validates the signature and expiry (401 if invalid), and stores the authenticated username from the `sub` claim in the request context. Protected handlers read the username from context and pass it directly to the domain service.
 - **Handlers**: Decode JSON, map to domain models, call domain services, encode responses.
 - **DTOs**: `RegisterUserRequest` / `UserResponse` wrap payloads in `{"user": {...}}` per the RealWorld spec.
 
@@ -128,7 +128,7 @@ The server accepts a `-env` flag (default `.env`) to select the env file at star
 
 The project implements user **registration**, **login**, **get current user**, and **update current user**. Notable gaps:
 - Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=username, 72h expiry).
-- `GET /api/user` and `PUT /api/user` are protected by `authMiddleware`, which centralises token extraction. JWT validation and user lookup remain in the domain service.
+- `GET /api/user` and `PUT /api/user` are protected by `authMiddleware`, which centralises both token extraction and JWT validation. The domain service receives the authenticated username directly and no longer handles tokens.
 - `PUT /api/user` supports partial updates (all fields optional); fetches current values, applies changes, and writes all fields back in one query.
 - Future protected routes can be added to the subrouter with a single line.
 - Articles, comments, and other RealWorld endpoints are not yet built.

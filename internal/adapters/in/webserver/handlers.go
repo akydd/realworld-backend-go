@@ -12,8 +12,8 @@ import (
 type userService interface {
 	RegisterUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error)
 	LoginUser(ctx context.Context, u *domain.LoginUser) (*domain.User, error)
-	GetUser(ctx context.Context, token string) (*domain.User, error)
-	UpdateUser(ctx context.Context, token string, u *domain.UpdateUser) (*domain.User, error)
+	GetUser(ctx context.Context, username string) (*domain.User, error)
+	UpdateUser(ctx context.Context, username string, u *domain.UpdateUser) (*domain.User, error)
 }
 
 type Handler struct {
@@ -174,9 +174,9 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	rawToken := r.Context().Value(tokenKey).(string)
+	username := r.Context().Value(usernameKey).(string)
 
-	user, err := h.service.GetUser(r.Context(), rawToken)
+	user, err := h.service.GetUser(r.Context(), username)
 	if err != nil {
 		var credErr *domain.CredentialsError
 		if errors.As(err, &credErr) {
@@ -198,7 +198,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 }
 
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	rawToken := r.Context().Value(tokenKey).(string)
+	username := r.Context().Value(usernameKey).(string)
 
 	var req UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -226,7 +226,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	user, err := h.service.UpdateUser(r.Context(), rawToken, &d)
+	user, err := h.service.UpdateUser(r.Context(), username, &d)
 	if err != nil {
 		var validationErr *domain.ValidationError
 		var credErr *domain.CredentialsError

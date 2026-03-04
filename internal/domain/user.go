@@ -92,23 +92,8 @@ func (c *UserController) LoginUser(ctx context.Context, u *LoginUser) (*User, er
 	return user, nil
 }
 
-func (c *UserController) GetUser(ctx context.Context, tokenString string) (*User, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, &CredentialsError{}
-		}
-		return []byte(c.jwtSecret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, &CredentialsError{}
-	}
-
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
-	if !ok || claims.Subject == "" {
-		return nil, &CredentialsError{}
-	}
-
-	user, err := c.repo.GetUserByUsername(ctx, claims.Subject)
+func (c *UserController) GetUser(ctx context.Context, username string) (*User, error) {
+	user, err := c.repo.GetUserByUsername(ctx, username)
 	if err != nil {
 		return nil, err
 	}
@@ -122,22 +107,8 @@ func (c *UserController) GetUser(ctx context.Context, tokenString string) (*User
 	return user, nil
 }
 
-func (c *UserController) UpdateUser(ctx context.Context, tokenString string, u *UpdateUser) (*User, error) {
-	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
-		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
-			return nil, &CredentialsError{}
-		}
-		return []byte(c.jwtSecret), nil
-	})
-	if err != nil || !token.Valid {
-		return nil, &CredentialsError{}
-	}
-
-	claims, ok := token.Claims.(*jwt.RegisteredClaims)
-	if !ok || claims.Subject == "" {
-		return nil, &CredentialsError{}
-	}
-	currentUsername := claims.Subject
+func (c *UserController) UpdateUser(ctx context.Context, username string, u *UpdateUser) (*User, error) {
+	currentUsername := username
 
 	if err := validateUpdateUser(u); err != nil {
 		return nil, err

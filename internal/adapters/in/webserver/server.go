@@ -22,13 +22,13 @@ type ServerHandlers interface {
 	UpdateUser(http.ResponseWriter, *http.Request)
 }
 
-func NewServer(port string, h ServerHandlers) (*Server, error) {
+func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error) {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/users", h.RegisterUser).Methods("POST")
 	r.HandleFunc("/api/users/login", h.LoginUser).Methods("POST")
 
 	protected := r.NewRoute().Subrouter()
-	protected.Use(authMiddleware)
+	protected.Use(authMiddleware(jwtSecret))
 	protected.HandleFunc("/api/user", h.GetUser).Methods("GET")
 	protected.HandleFunc("/api/user", h.UpdateUser).Methods("PUT")
 
