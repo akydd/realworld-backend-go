@@ -39,7 +39,7 @@ func main() {
 
 	log.Printf("starting server on port %s...\n", port)
 
-	s, err := webserver.NewServer(port, handlers)
+	s, err := webserver.NewServer(port, handlers, os.Getenv("JWT_SECRET"))
 	if err != nil {
 		log.Fatal(err)
 	}
