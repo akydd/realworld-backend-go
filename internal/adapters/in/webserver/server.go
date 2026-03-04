@@ -19,6 +19,7 @@ type ServerHandlers interface {
 	RegisterUser(http.ResponseWriter, *http.Request)
 	LoginUser(http.ResponseWriter, *http.Request)
 	GetUser(http.ResponseWriter, *http.Request)
+	UpdateUser(http.ResponseWriter, *http.Request)
 }
 
 func NewServer(port string, h ServerHandlers) (*Server, error) {
@@ -26,6 +27,7 @@ func NewServer(port string, h ServerHandlers) (*Server, error) {
 	r.HandleFunc("/api/users", h.RegisterUser).Methods("POST")
 	r.HandleFunc("/api/users/login", h.LoginUser).Methods("POST")
 	r.HandleFunc("/api/user", h.GetUser).Methods("GET")
+	r.HandleFunc("/api/user", h.UpdateUser).Methods("PUT")
 
 	// logging!
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)

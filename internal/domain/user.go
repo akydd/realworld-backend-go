@@ -12,6 +12,8 @@ type userRepo interface {
 	InsertUser(ctx context.Context, u *RegisterUser) (*User, error)
 	GetUserByEmail(ctx context.Context, email string) (*User, string, error)
 	GetUserByUsername(ctx context.Context, username string) (*User, error)
+	GetFullUserByUsername(ctx context.Context, username string) (*User, string, error)
+	UpdateUser(ctx context.Context, currentUsername string, u *UpdateUserData) (*User, error)
 }
 
 type UserController struct {
@@ -118,6 +120,90 @@ func (c *UserController) GetUser(ctx context.Context, tokenString string) (*User
 	user.Token = newToken
 
 	return user, nil
+}
+
+func (c *UserController) UpdateUser(ctx context.Context, tokenString string, u *UpdateUser) (*User, error) {
+	token, err := jwt.ParseWithClaims(tokenString, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+		if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, &CredentialsError{}
+		}
+		return []byte(c.jwtSecret), nil
+	})
+	if err != nil || !token.Valid {
+		return nil, &CredentialsError{}
+	}
+
+	claims, ok := token.Claims.(*jwt.RegisteredClaims)
+	if !ok || claims.Subject == "" {
+		return nil, &CredentialsError{}
+	}
+	currentUsername := claims.Subject
+
+	if err := validateUpdateUser(u); err != nil {
+		return nil, err
+	}
+
+	current, hashedPassword, err := c.repo.GetFullUserByUsername(ctx, currentUsername)
+	if err != nil {
+		return nil, err
+	}
+
+	data := UpdateUserData{
+		Email:    current.Email,
+		Username: current.Username,
+		Password: hashedPassword,
+		Bio:      current.Bio,
+		Image:    current.Image,
+	}
+
+	if u.Email != nil {
+		data.Email = *u.Email
+	}
+	if u.Username != nil {
+		data.Username = *u.Username
+	}
+	if u.Password != nil {
+		hash, err := argon2id.CreateHash(*u.Password, argon2id.DefaultParams)
+		if err != nil {
+			return nil, err
+		}
+		data.Password = hash
+	}
+	if u.Bio != nil {
+		data.Bio = *u.Bio
+	}
+	if u.Image != nil {
+		data.Image = *u.Image
+	}
+
+	updated, err := c.repo.UpdateUser(ctx, currentUsername, &data)
+	if err != nil {
+		return nil, err
+	}
+
+	newToken, err := generateToken(updated.Username, c.jwtSecret)
+	if err != nil {
+		return nil, err
+	}
+	updated.Token = newToken
+
+	return updated, nil
+}
+
+func validateUpdateUser(u *UpdateUser) error {
+	if u.Email == nil && u.Bio == nil && u.Image == nil && u.Username == nil && u.Password == nil {
+		return NewValidationError("user", blankFieldErrMsg)
+	}
+	if u.Email != nil && *u.Email == "" {
+		return NewValidationError("email", blankFieldErrMsg)
+	}
+	if u.Username != nil && *u.Username == "" {
+		return NewValidationError("username", blankFieldErrMsg)
+	}
+	if u.Password != nil && *u.Password == "" {
+		return NewValidationError("password", blankFieldErrMsg)
+	}
+	return nil
 }
 
 func validateRegisterUser(r *RegisterUser) error {

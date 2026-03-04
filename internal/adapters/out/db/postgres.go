@@ -97,11 +97,13 @@ func convertUser(u user) domain.User {
 	}
 
 	if u.Bio.Valid {
-		*d.Bio = u.Bio.String
+		s := u.Bio.String
+		d.Bio = &s
 	}
 
 	if u.Image.Valid {
-		*d.Image = u.Image.String
+		s := u.Image.String
+		d.Image = &s
 	}
 
 	return d
@@ -121,6 +123,44 @@ func (p *Postgres) GetUserByUsername(ctx context.Context, username string) (*dom
 
 	u := convertUser(dbUser)
 	return &u, nil
+}
+
+func (p *Postgres) GetFullUserByUsername(ctx context.Context, username string) (*domain.User, string, error) {
+	query := "SELECT username, email, bio, image, password FROM users WHERE username = $1"
+	var dbUser userWithPassword
+
+	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, "", &domain.CredentialsError{}
+		}
+		return nil, "", err
+	}
+
+	u := convertUser(dbUser.user)
+	return &u, dbUser.Password, nil
+}
+
+func (p *Postgres) UpdateUser(ctx context.Context, currentUsername string, u *domain.UpdateUserData) (*domain.User, error) {
+	query := `UPDATE users SET email=$1, username=$2, password=$3, bio=$4, image=$5 WHERE username=$6 RETURNING username, email, bio, image`
+	var dbUser user
+
+	err := p.db.QueryRowxContext(ctx, query, u.Email, u.Username, u.Password, u.Bio, u.Image, currentUsername).StructScan(&dbUser)
+	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			switch pqErr.Constraint {
+			case "users_email_unique":
+				return nil, domain.NewDuplicateError("email")
+			case "users_username_unique":
+				return nil, domain.NewDuplicateError("username")
+			}
+		}
+		return nil, err
+	}
+
+	updated := convertUser(dbUser)
+	return &updated, nil
 }
 
 func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.User, string, error) {

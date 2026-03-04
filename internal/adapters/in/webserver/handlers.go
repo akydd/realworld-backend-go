@@ -14,6 +14,7 @@ type userService interface {
 	RegisterUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error)
 	LoginUser(ctx context.Context, u *domain.LoginUser) (*domain.User, error)
 	GetUser(ctx context.Context, token string) (*domain.User, error)
+	UpdateUser(ctx context.Context, token string, u *domain.UpdateUser) (*domain.User, error)
 }
 
 type Handler struct {
@@ -43,6 +44,39 @@ type RegisterUserInner struct {
 
 type RegisterUserRequest struct {
 	User RegisterUserInner `json:"user"`
+}
+
+// NullableString distinguishes a JSON field being absent (Present=false)
+// from being explicitly set to null or "" (Present=true, Value=nil/"").
+type NullableString struct {
+	Value   *string
+	Present bool
+}
+
+func (n *NullableString) UnmarshalJSON(data []byte) error {
+	n.Present = true
+	if string(data) == "null" {
+		n.Value = nil
+		return nil
+	}
+	var s string
+	if err := json.Unmarshal(data, &s); err != nil {
+		return err
+	}
+	n.Value = &s
+	return nil
+}
+
+type UpdateUserInner struct {
+	Email    *string        `json:"email"`
+	Bio      NullableString `json:"bio"`
+	Image    NullableString `json:"image"`
+	Username *string        `json:"username"`
+	Password *string        `json:"password"`
+}
+
+type UpdateUserRequest struct {
+	User UpdateUserInner `json:"user"`
 }
 
 type UserResponseInner struct {
@@ -159,6 +193,74 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 		if errors.As(err, &credErr) {
 			w.WriteHeader(http.StatusUnauthorized)
 			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	resp := UserResponse{
+		User: UserResponseInner(*user),
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
+	authHeader := r.Header.Get("Authorization")
+	w.Header().Set("Content-Type", "application/json")
+
+	const prefix = "Token "
+	if authHeader == "" || !strings.HasPrefix(authHeader, prefix) {
+		w.WriteHeader(http.StatusUnauthorized)
+		_, _ = w.Write(createErrResponse("token", []string{"is missing"}))
+		return
+	}
+
+	rawToken := strings.TrimPrefix(authHeader, prefix)
+
+	var req UpdateUserRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	d := domain.UpdateUser{
+		Email:    req.User.Email,
+		Username: req.User.Username,
+		Password: req.User.Password,
+	}
+	if req.User.Bio.Present {
+		if req.User.Bio.Value != nil && *req.User.Bio.Value != "" {
+			d.Bio = &req.User.Bio.Value
+		} else {
+			d.Bio = new(*string) // pointer to nil *string = set to null
+		}
+	}
+	if req.User.Image.Present {
+		if req.User.Image.Value != nil && *req.User.Image.Value != "" {
+			d.Image = &req.User.Image.Value
+		} else {
+			d.Image = new(*string)
+		}
+	}
+
+	user, err := h.service.UpdateUser(r.Context(), rawToken, &d)
+	if err != nil {
+		var validationErr *domain.ValidationError
+		var credErr *domain.CredentialsError
+		var dupErr *domain.DuplicateError
+		if errors.As(err, &validationErr) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write(createErrResponse(validationErr.Field, validationErr.Errors))
+		} else if errors.As(err, &credErr) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else if errors.As(err, &dupErr) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write(createErrResponse(dupErr.Field, []string{dupErr.Msg}))
 		} else {
 			fmt.Println(err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
