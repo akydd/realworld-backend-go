@@ -27,6 +27,13 @@ type UpdateUser struct {
 	Password *string
 }
 
+type Profile struct {
+	Username  string
+	Bio       *string
+	Image     *string
+	Following bool
+}
+
 type UpdateUserData struct {
 	Email    string
 	Username string

@@ -109,6 +109,34 @@ func convertUser(u user) domain.User {
 	return d
 }
 
+func (p *Postgres) GetProfileByUsername(ctx context.Context, username string) (*domain.Profile, error) {
+	query := "SELECT username, bio, image FROM users WHERE username = $1"
+	var dbUser user
+
+	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.ProfileNotFoundError{}
+		}
+		return nil, err
+	}
+
+	profile := domain.Profile{
+		Username:  dbUser.Username,
+		Following: false,
+	}
+	if dbUser.Bio.Valid {
+		s := dbUser.Bio.String
+		profile.Bio = &s
+	}
+	if dbUser.Image.Valid {
+		s := dbUser.Image.String
+		profile.Image = &s
+	}
+
+	return &profile, nil
+}
+
 func (p *Postgres) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
 	query := "SELECT username, email, bio, image FROM users WHERE username = $1"
 	var dbUser user

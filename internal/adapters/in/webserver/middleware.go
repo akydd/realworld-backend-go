@@ -12,6 +12,31 @@ type contextKey string
 
 const usernameKey contextKey = "username"
 
+func optionalAuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
+	return func(next http.Handler) http.Handler {
+		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+			authHeader := r.Header.Get("Authorization")
+			const prefix = "Token "
+			if authHeader != "" && strings.HasPrefix(authHeader, prefix) {
+				rawToken := strings.TrimPrefix(authHeader, prefix)
+				token, err := jwt.ParseWithClaims(rawToken, &jwt.RegisteredClaims{}, func(t *jwt.Token) (interface{}, error) {
+					if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+						return nil, jwt.ErrSignatureInvalid
+					}
+					return []byte(jwtSecret), nil
+				})
+				if err == nil && token.Valid {
+					if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && claims.Subject != "" {
+						ctx := context.WithValue(r.Context(), usernameKey, claims.Subject)
+						r = r.WithContext(ctx)
+					}
+				}
+			}
+			next.ServeHTTP(w, r)
+		})
+	}
+}
+
 func authMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
 		return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

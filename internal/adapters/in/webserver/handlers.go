@@ -7,6 +7,8 @@ import (
 	"fmt"
 	"net/http"
 	"realworld-backend-go/internal/domain"
+
+	"github.com/gorilla/mux"
 )
 
 type userService interface {
@@ -16,13 +18,19 @@ type userService interface {
 	UpdateUser(ctx context.Context, username string, u *domain.UpdateUser) (*domain.User, error)
 }
 
-type Handler struct {
-	service userService
+type profileService interface {
+	GetProfile(ctx context.Context, profileUsername string, viewerUsername string) (*domain.Profile, error)
 }
 
-func NewHandler(s userService) *Handler {
+type Handler struct {
+	service        userService
+	profileService profileService
+}
+
+func NewHandler(s userService, ps profileService) *Handler {
 	return &Handler{
-		service: s,
+		service:        s,
+		profileService: ps,
 	}
 }
 
@@ -250,6 +258,49 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 
 	resp := UserResponse{
 		User: UserResponseInner(*user),
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+type ProfileResponseInner struct {
+	Username  string  `json:"username"`
+	Bio       *string `json:"bio"`
+	Image     *string `json:"image"`
+	Following bool    `json:"following"`
+}
+
+type ProfileResponse struct {
+	Profile ProfileResponseInner `json:"profile"`
+}
+
+func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	profileUsername := mux.Vars(r)["username"]
+	viewerUsername, _ := r.Context().Value(usernameKey).(string)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	profile, err := h.profileService.GetProfile(r.Context(), profileUsername, viewerUsername)
+	if err != nil {
+		var notFoundErr *domain.ProfileNotFoundError
+		if errors.As(err, &notFoundErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("profile", []string{"not found"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	resp := ProfileResponse{
+		Profile: ProfileResponseInner{
+			Username:  profile.Username,
+			Bio:       profile.Bio,
+			Image:     profile.Image,
+			Following: profile.Following,
+		},
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
