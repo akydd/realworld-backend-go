@@ -20,6 +20,7 @@ type ServerHandlers interface {
 	LoginUser(http.ResponseWriter, *http.Request)
 	GetUser(http.ResponseWriter, *http.Request)
 	UpdateUser(http.ResponseWriter, *http.Request)
+	GetProfile(http.ResponseWriter, *http.Request)
 }
 
 func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error) {
@@ -31,6 +32,10 @@ func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error)
 	protected.Use(authMiddleware(jwtSecret))
 	protected.HandleFunc("/api/user", h.GetUser).Methods("GET")
 	protected.HandleFunc("/api/user", h.UpdateUser).Methods("PUT")
+
+	optionalAuth := r.NewRoute().Subrouter()
+	optionalAuth.Use(optionalAuthMiddleware(jwtSecret))
+	optionalAuth.HandleFunc("/api/profiles/{username}", h.GetProfile).Methods("GET")
 
 	// logging!
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)

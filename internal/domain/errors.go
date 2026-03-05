@@ -47,3 +47,9 @@ type CredentialsError struct{}
 func (c *CredentialsError) Error() string {
 	return "invalid credentials"
 }
+
+type ProfileNotFoundError struct{}
+
+func (p *ProfileNotFoundError) Error() string {
+	return "profile not found"
+}
