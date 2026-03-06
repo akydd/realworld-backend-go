@@ -19,7 +19,7 @@ type userService interface {
 }
 
 type profileService interface {
-	GetProfile(ctx context.Context, profileUsername string, viewerID int) (*domain.Profile, error)
+	GetProfile(ctx context.Context, profileUsername string) (*domain.Profile, error)
 }
 
 type Handler struct {
@@ -300,11 +300,10 @@ type ProfileResponse struct {
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	profileUsername := mux.Vars(r)["username"]
-	viewerID, _ := r.Context().Value(userIDKey).(int)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	profile, err := h.profileService.GetProfile(r.Context(), profileUsername, viewerID)
+	profile, err := h.profileService.GetProfile(r.Context(), profileUsername)
 	if err != nil {
 		var notFoundErr *domain.ProfileNotFoundError
 		if errors.As(err, &notFoundErr) {

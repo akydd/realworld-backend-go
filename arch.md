@@ -37,8 +37,8 @@ realworld-backend-go/
 Pure Go with no framework dependencies. Contains:
 - **`UserController`**: Orchestrates user registration — validates input, hashes password with Argon2ID, calls the repository, returns a domain `User`. JWTs use the user's immutable integer `ID` as the `sub` claim (stored as a decimal string per the JWT spec).
 - **`userRepo` interface**: Decouples domain from persistence. The DB adapter implements this. Key methods: `InsertUser`, `GetUserByEmail`, `GetUserByID`, `GetFullUserByID`, `UpdateUser`.
-- **`ProfileController`**: Handles profile lookups. Accepts the target username and optional viewer ID (0 = unauthenticated) to compute the `following` field.
-- **`profileRepo` interface**: Decouples profile domain from persistence. Method: `GetProfileByUsername(profileUsername, viewerID int)`.
+- **`ProfileController`**: Handles profile lookups. Always returns `following: false` on this branch (the `follows` table is not present; follow/unfollow support will be merged from the `8-follow-user` branch).
+- **`profileRepo` interface**: Decouples profile domain from persistence. Method: `GetProfileByUsername(profileUsername string)`.
 - **`ValidationError`**: Structured field-level validation errors for HTTP consumers.
 - **`DuplicateError`**: Error type returned when a unique constraint is violated. Carries the `Field` name and a fixed message (`"has already been taken"`).
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
@@ -71,7 +71,7 @@ PostgreSQL persistence via `sqlx`:
 - `GetUserByID()` fetches a user by ID. Returns `*domain.CredentialsError` when no row is found.
 - `GetFullUserByID()` fetches a user and their hashed password by ID. Returns `*domain.CredentialsError` when no row is found.
 - `UpdateUser()` updates all user fields by user ID and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
-- `GetProfileByUsername(profileUsername, viewerID)` fetches a user's public profile fields by username. LEFT JOINs `follows` using `viewerID` directly to compute `following`; `viewerID=0` always yields `following=false`. Returns `*domain.ProfileNotFoundError` when no row is found.
+- `GetProfileByUsername(profileUsername)` fetches a user's public profile fields by username. Always returns `following=false` on this branch. Returns `*domain.ProfileNotFoundError` when no row is found.
 
 **Schema (`users` table):**
 | Column | Type | Notes |

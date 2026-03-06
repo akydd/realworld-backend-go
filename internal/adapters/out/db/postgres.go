@@ -111,7 +111,7 @@ func convertUser(u user) domain.User {
 	return d
 }
 
-func (p *Postgres) GetProfileByUsername(ctx context.Context, profileUsername string, viewerID int) (*domain.Profile, error) {
+func (p *Postgres) GetProfileByUsername(ctx context.Context, profileUsername string) (*domain.Profile, error) {
 	query := "SELECT id, username, bio, image FROM users WHERE username = $1"
 	var dbUser user
 
