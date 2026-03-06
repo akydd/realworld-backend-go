@@ -12,6 +12,7 @@ type LoginUser struct {
 }
 
 type User struct {
+	ID       int
 	Email    string
 	Token    string
 	Username string

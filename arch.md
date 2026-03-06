@@ -35,10 +35,10 @@ realworld-backend-go/
 
 ### Domain (`internal/domain/`)
 Pure Go with no framework dependencies. Contains:
-- **`UserController`**: Orchestrates user registration — validates input, hashes password with Argon2ID, calls the repository, returns a domain `User`.
-- **`userRepo` interface**: Decouples domain from persistence. The DB adapter implements this.
-- **`ProfileController`**: Handles profile lookups. Accepts both the target username and the optional viewer username (for future follow/unfollow support).
-- **`profileRepo` interface**: Decouples profile domain from persistence.
+- **`UserController`**: Orchestrates user registration — validates input, hashes password with Argon2ID, calls the repository, returns a domain `User`. JWTs use the user's immutable integer `ID` as the `sub` claim (stored as a decimal string per the JWT spec).
+- **`userRepo` interface**: Decouples domain from persistence. The DB adapter implements this. Key methods: `InsertUser`, `GetUserByEmail`, `GetUserByID`, `GetFullUserByID`, `UpdateUser`.
+- **`ProfileController`**: Handles profile lookups. Accepts the target username and optional viewer ID (0 = unauthenticated) to compute the `following` field.
+- **`profileRepo` interface**: Decouples profile domain from persistence. Method: `GetProfileByUsername(profileUsername, viewerID int)`.
 - **`ValidationError`**: Structured field-level validation errors for HTTP consumers.
 - **`DuplicateError`**: Error type returned when a unique constraint is violated. Carries the `Field` name and a fixed message (`"has already been taken"`).
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
@@ -47,7 +47,7 @@ Pure Go with no framework dependencies. Contains:
 ### Inbound Adapter — HTTP (`internal/adapters/in/webserver/`)
 Handles the HTTP protocol layer:
 - **Router**: Gorilla Mux with Gorilla Handlers for Apache-style request logging. Protected routes are grouped in a subrouter with `authMiddleware` applied.
-- **Middleware**: `authMiddleware(jwtSecret)` extracts the JWT from the `Authorization: Token {jwt}` header (401 if missing), validates the signature and expiry (401 if invalid), and stores the authenticated username from the `sub` claim in the request context. Protected handlers read the username from context and pass it directly to the domain service. `optionalAuthMiddleware(jwtSecret)` performs the same validation but silently ignores absent or invalid tokens — used for routes where authentication is optional.
+- **Middleware**: `authMiddleware(jwtSecret)` extracts the JWT from the `Authorization: Token {jwt}` header (401 if missing), validates the signature and expiry (401 if invalid), parses the `sub` claim as an integer user ID (401 if not a valid integer), and stores it in the request context under `userIDKey`. Protected handlers read the user ID from context and pass it directly to the domain service. `optionalAuthMiddleware(jwtSecret)` performs the same validation but silently ignores absent or invalid tokens — used for routes where authentication is optional.
 - **Handlers**: Decode JSON, map to domain models, call domain services, encode responses.
 - **DTOs**: `RegisterUserRequest` / `UserResponse` wrap payloads in `{"user": {...}}` per the RealWorld spec.
 
@@ -68,10 +68,10 @@ PostgreSQL persistence via `sqlx`:
 - Parameterized queries to prevent SQL injection.
 - `InsertUser()` inserts a user and returns the created record via `RETURNING`. Detects PostgreSQL unique-violation errors (code `23505`) and maps them to `*domain.DuplicateError` by constraint name.
 - `GetUserByEmail()` fetches a user and their hashed password by email. Returns `*domain.CredentialsError` when no row is found.
-- `GetUserByUsername()` fetches a user by username. Returns `*domain.CredentialsError` when no row is found.
-- `GetFullUserByUsername()` fetches a user and their hashed password by username. Returns `*domain.CredentialsError` when no row is found.
-- `UpdateUser()` updates all user fields by current username and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
-- `GetProfileByUsername()` fetches a user's public profile fields by username. Returns `*domain.ProfileNotFoundError` when no row is found.
+- `GetUserByID()` fetches a user by ID. Returns `*domain.CredentialsError` when no row is found.
+- `GetFullUserByID()` fetches a user and their hashed password by ID. Returns `*domain.CredentialsError` when no row is found.
+- `UpdateUser()` updates all user fields by user ID and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
+- `GetProfileByUsername(profileUsername, viewerID)` fetches a user's public profile fields by username. LEFT JOINs `follows` using `viewerID` directly to compute `following`; `viewerID=0` always yields `following=false`. Returns `*domain.ProfileNotFoundError` when no row is found.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -133,8 +133,8 @@ The server accepts a `-env` flag (default `.env`) to select the env file at star
 ## Current State
 
 The project implements user **registration**, **login**, **get current user**, **update current user**, and **get profile**. Notable gaps:
-- Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=username, 72h expiry).
-- `GET /api/user` and `PUT /api/user` are protected by `authMiddleware`, which centralises both token extraction and JWT validation. The domain service receives the authenticated username directly and no longer handles tokens.
+- Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=user ID as decimal string, 72h expiry). Using the immutable user ID means tokens remain valid even if the user changes their username.
+- `GET /api/user` and `PUT /api/user` are protected by `authMiddleware`, which centralises both token extraction and JWT validation. The domain service receives the authenticated user ID (int) directly and no longer handles tokens.
 - `PUT /api/user` supports partial updates (all fields optional); fetches current values, applies changes, and writes all fields back in one query.
 - Future protected routes can be added to the protected subrouter with a single line; optionally-authenticated routes go on the optional-auth subrouter.
 - `GET /api/profiles/{username}` always returns `following: false`; follow/unfollow endpoints are not yet built.

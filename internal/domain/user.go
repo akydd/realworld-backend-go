@@ -2,6 +2,7 @@ package domain
 
 import (
 	"context"
+	"strconv"
 	"time"
 
 	"github.com/alexedwards/argon2id"
@@ -11,9 +12,9 @@ import (
 type userRepo interface {
 	InsertUser(ctx context.Context, u *RegisterUser) (*User, error)
 	GetUserByEmail(ctx context.Context, email string) (*User, string, error)
-	GetUserByUsername(ctx context.Context, username string) (*User, error)
-	GetFullUserByUsername(ctx context.Context, username string) (*User, string, error)
-	UpdateUser(ctx context.Context, currentUsername string, u *UpdateUserData) (*User, error)
+	GetUserByID(ctx context.Context, id int) (*User, error)
+	GetFullUserByID(ctx context.Context, id int) (*User, string, error)
+	UpdateUser(ctx context.Context, userID int, u *UpdateUserData) (*User, error)
 }
 
 type UserController struct {
@@ -44,7 +45,7 @@ func (c *UserController) RegisterUser(ctx context.Context, u *RegisterUser) (*Us
 		return nil, err
 	}
 
-	token, err := generateToken(user.Username, c.jwtSecret)
+	token, err := generateToken(user.ID, c.jwtSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -53,9 +54,9 @@ func (c *UserController) RegisterUser(ctx context.Context, u *RegisterUser) (*Us
 	return user, nil
 }
 
-func generateToken(username string, secret string) (string, error) {
+func generateToken(id int, secret string) (string, error) {
 	claims := jwt.RegisteredClaims{
-		Subject:   username,
+		Subject:   strconv.Itoa(id),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(72 * time.Hour)),
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
@@ -83,7 +84,7 @@ func (c *UserController) LoginUser(ctx context.Context, u *LoginUser) (*User, er
 		return nil, &CredentialsError{}
 	}
 
-	token, err := generateToken(user.Username, c.jwtSecret)
+	token, err := generateToken(user.ID, c.jwtSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -92,13 +93,13 @@ func (c *UserController) LoginUser(ctx context.Context, u *LoginUser) (*User, er
 	return user, nil
 }
 
-func (c *UserController) GetUser(ctx context.Context, username string) (*User, error) {
-	user, err := c.repo.GetUserByUsername(ctx, username)
+func (c *UserController) GetUser(ctx context.Context, userID int) (*User, error) {
+	user, err := c.repo.GetUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
 
-	newToken, err := generateToken(user.Username, c.jwtSecret)
+	newToken, err := generateToken(user.ID, c.jwtSecret)
 	if err != nil {
 		return nil, err
 	}
@@ -107,14 +108,12 @@ func (c *UserController) GetUser(ctx context.Context, username string) (*User, e
 	return user, nil
 }
 
-func (c *UserController) UpdateUser(ctx context.Context, username string, u *UpdateUser) (*User, error) {
-	currentUsername := username
-
+func (c *UserController) UpdateUser(ctx context.Context, userID int, u *UpdateUser) (*User, error) {
 	if err := validateUpdateUser(u); err != nil {
 		return nil, err
 	}
 
-	current, hashedPassword, err := c.repo.GetFullUserByUsername(ctx, currentUsername)
+	current, hashedPassword, err := c.repo.GetFullUserByID(ctx, userID)
 	if err != nil {
 		return nil, err
 	}
@@ -147,12 +146,12 @@ func (c *UserController) UpdateUser(ctx context.Context, username string, u *Upd
 		data.Image = *u.Image
 	}
 
-	updated, err := c.repo.UpdateUser(ctx, currentUsername, &data)
+	updated, err := c.repo.UpdateUser(ctx, userID, &data)
 	if err != nil {
 		return nil, err
 	}
 
-	newToken, err := generateToken(updated.Username, c.jwtSecret)
+	newToken, err := generateToken(updated.ID, c.jwtSecret)
 	if err != nil {
 		return nil, err
 	}
