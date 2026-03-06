@@ -20,6 +20,8 @@ type userService interface {
 
 type profileService interface {
 	GetProfile(ctx context.Context, profileUsername string, viewerUsername string) (*domain.Profile, error)
+	FollowUser(ctx context.Context, followerUsername, followeeUsername string) (*domain.Profile, error)
+	UnfollowUser(ctx context.Context, followerUsername, followeeUsername string) (*domain.Profile, error)
 }
 
 type Handler struct {
@@ -304,6 +306,46 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) followProfile(w http.ResponseWriter, r *http.Request, profile *domain.Profile, err error) {
+	w.Header().Set("Content-Type", "application/json")
+	if err != nil {
+		var notFoundErr *domain.ProfileNotFoundError
+		if errors.As(err, &notFoundErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("profile", []string{"not found"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+	resp := ProfileResponse{
+		Profile: ProfileResponseInner{
+			Username:  profile.Username,
+			Bio:       profile.Bio,
+			Image:     profile.Image,
+			Following: profile.Following,
+		},
+	}
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
+func (h *Handler) FollowUser(w http.ResponseWriter, r *http.Request) {
+	authUsername := r.Context().Value(usernameKey).(string)
+	profileUsername := mux.Vars(r)["username"]
+	profile, err := h.profileService.FollowUser(r.Context(), authUsername, profileUsername)
+	h.followProfile(w, r, profile, err)
+}
+
+func (h *Handler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
+	authUsername := r.Context().Value(usernameKey).(string)
+	profileUsername := mux.Vars(r)["username"]
+	profile, err := h.profileService.UnfollowUser(r.Context(), authUsername, profileUsername)
+	h.followProfile(w, r, profile, err)
 }
 
 func createErrResponse(k string, v []string) []byte {

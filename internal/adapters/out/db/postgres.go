@@ -109,11 +109,25 @@ func convertUser(u user) domain.User {
 	return d
 }
 
-func (p *Postgres) GetProfileByUsername(ctx context.Context, username string) (*domain.Profile, error) {
-	query := "SELECT username, bio, image FROM users WHERE username = $1"
-	var dbUser user
+type profileRow struct {
+	Username  string         `db:"username"`
+	Bio       sql.NullString `db:"bio"`
+	Image     sql.NullString `db:"image"`
+	Following bool           `db:"following"`
+}
 
-	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+func (p *Postgres) GetProfileByUsername(ctx context.Context, profileUsername string, viewerUsername string) (*domain.Profile, error) {
+	query := `
+		SELECT u.username, u.bio, u.image,
+			CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS following
+		FROM users u
+		LEFT JOIN follows f
+			ON f.followee_id = u.id
+			AND f.follower_id = (SELECT id FROM users WHERE username = $2)
+		WHERE u.username = $1`
+	var row profileRow
+
+	err := p.db.QueryRowxContext(ctx, query, profileUsername, viewerUsername).StructScan(&row)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &domain.ProfileNotFoundError{}
@@ -122,19 +136,55 @@ func (p *Postgres) GetProfileByUsername(ctx context.Context, username string) (*
 	}
 
 	profile := domain.Profile{
-		Username:  dbUser.Username,
-		Following: false,
+		Username:  row.Username,
+		Following: row.Following,
 	}
-	if dbUser.Bio.Valid {
-		s := dbUser.Bio.String
+	if row.Bio.Valid {
+		s := row.Bio.String
 		profile.Bio = &s
 	}
-	if dbUser.Image.Valid {
-		s := dbUser.Image.String
+	if row.Image.Valid {
+		s := row.Image.String
 		profile.Image = &s
 	}
 
 	return &profile, nil
+}
+
+func (p *Postgres) FollowUser(ctx context.Context, followerUsername, followeeUsername string) error {
+	var followeeID int
+	err := p.db.QueryRowxContext(ctx, "SELECT id FROM users WHERE username = $1", followeeUsername).Scan(&followeeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.ProfileNotFoundError{}
+		}
+		return err
+	}
+
+	_, err = p.db.ExecContext(ctx, `
+		INSERT INTO follows (follower_id, followee_id)
+		SELECT f.id, e.id FROM users f, users e
+		WHERE f.username = $1 AND e.username = $2
+		ON CONFLICT DO NOTHING`, followerUsername, followeeUsername)
+	return err
+}
+
+func (p *Postgres) UnfollowUser(ctx context.Context, followerUsername, followeeUsername string) error {
+	var followeeID int
+	err := p.db.QueryRowxContext(ctx, "SELECT id FROM users WHERE username = $1", followeeUsername).Scan(&followeeID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.ProfileNotFoundError{}
+		}
+		return err
+	}
+
+	_, err = p.db.ExecContext(ctx, `
+		DELETE FROM follows
+		WHERE follower_id = (SELECT id FROM users WHERE username = $1)
+		  AND followee_id = (SELECT id FROM users WHERE username = $2)`,
+		followerUsername, followeeUsername)
+	return err
 }
 
 func (p *Postgres) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {

@@ -13,6 +13,6 @@ int-tests:
 	RESULT=$$?; \
 	kill $$(cat server.pid) 2>/dev/null || true; \
 	rm -f server.pid; \
-	docker compose -f compose.test.yaml exec -T test_db psql -U admin -d test-app -c "TRUNCATE TABLE users;"; \
+	docker compose -f compose.test.yaml exec -T test_db psql -U admin -d test-app -c "TRUNCATE TABLE follows, users;"; \
 	docker compose -f compose.test.yaml down; \
 	exit $$RESULT

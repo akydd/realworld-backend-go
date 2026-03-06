@@ -23,7 +23,8 @@ realworld-backend-go/
 │           ├── postgres.go           # sqlx-based repository
 │           └── migrations/
 │               ├── 001_create_users.sql
-│               └── 002_unique_users.sql
+│               ├── 002_unique_users.sql
+│               └── 003_follows.sql
 ├── compose.yaml                      # Docker Compose (prod DB)
 ├── compose.test.yaml                 # Docker Compose (test DB)
 ├── Makefile                          # make int-tests runner
@@ -37,8 +38,8 @@ realworld-backend-go/
 Pure Go with no framework dependencies. Contains:
 - **`UserController`**: Orchestrates user registration — validates input, hashes password with Argon2ID, calls the repository, returns a domain `User`.
 - **`userRepo` interface**: Decouples domain from persistence. The DB adapter implements this.
-- **`ProfileController`**: Handles profile lookups. Accepts both the target username and the optional viewer username (for future follow/unfollow support).
-- **`profileRepo` interface**: Decouples profile domain from persistence.
+- **`ProfileController`**: Handles profile lookups, follow, and unfollow. `GetProfile` accepts both the target username and the optional viewer username to compute the `following` field. `FollowUser` and `UnfollowUser` call the repo to insert/delete the relationship, then return the updated profile.
+- **`profileRepo` interface**: Decouples profile domain from persistence. Methods: `GetProfileByUsername(profileUsername, viewerUsername)`, `FollowUser`, `UnfollowUser`.
 - **`ValidationError`**: Structured field-level validation errors for HTTP consumers.
 - **`DuplicateError`**: Error type returned when a unique constraint is violated. Carries the `Field` name and a fixed message (`"has already been taken"`).
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
@@ -59,6 +60,8 @@ Handles the HTTP protocol layer:
 | GET | `/api/user` | Get the authenticated user |
 | PUT | `/api/user` | Update the authenticated user |
 | GET | `/api/profiles/{username}` | Get a user's public profile (auth optional) |
+| POST | `/api/profiles/{username}/follow` | Follow a user (auth required) |
+| DELETE | `/api/profiles/{username}/follow` | Unfollow a user (auth required) |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
 
@@ -71,7 +74,9 @@ PostgreSQL persistence via `sqlx`:
 - `GetUserByUsername()` fetches a user by username. Returns `*domain.CredentialsError` when no row is found.
 - `GetFullUserByUsername()` fetches a user and their hashed password by username. Returns `*domain.CredentialsError` when no row is found.
 - `UpdateUser()` updates all user fields by current username and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
-- `GetProfileByUsername()` fetches a user's public profile fields by username. Returns `*domain.ProfileNotFoundError` when no row is found.
+- `GetProfileByUsername(profileUsername, viewerUsername)` fetches a user's public profile fields by username. LEFT JOINs `follows` to compute the `following` field for the viewer; if `viewerUsername` is empty, `following` is always false. Returns `*domain.ProfileNotFoundError` when no row is found.
+- `FollowUser(followerUsername, followeeUsername)` checks the followee exists (returns `*domain.ProfileNotFoundError` if not), then inserts a row into `follows` (idempotent via `ON CONFLICT DO NOTHING`).
+- `UnfollowUser(followerUsername, followeeUsername)` checks the followee exists (returns `*domain.ProfileNotFoundError` if not), then deletes the corresponding row from `follows`.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -82,6 +87,12 @@ PostgreSQL persistence via `sqlx`:
 | password | VARCHAR(100) | Argon2ID hash |
 | bio | TEXT | Optional |
 | image | VARCHAR(100) | Optional (profile picture URL) |
+
+**Schema (`follows` table):**
+| Column | Type | Notes |
+|--------|------|-------|
+| follower_id | INTEGER | FK → `users(id)`, part of composite PK |
+| followee_id | INTEGER | FK → `users(id)`, part of composite PK |
 
 ## Key Dependencies
 
@@ -137,5 +148,6 @@ The project implements user **registration**, **login**, **get current user**, *
 - `GET /api/user` and `PUT /api/user` are protected by `authMiddleware`, which centralises both token extraction and JWT validation. The domain service receives the authenticated username directly and no longer handles tokens.
 - `PUT /api/user` supports partial updates (all fields optional); fetches current values, applies changes, and writes all fields back in one query.
 - Future protected routes can be added to the protected subrouter with a single line; optionally-authenticated routes go on the optional-auth subrouter.
-- `GET /api/profiles/{username}` always returns `following: false`; follow/unfollow endpoints are not yet built.
+- `GET /api/profiles/{username}` returns the correct `following` value based on whether the authenticated viewer follows the profile user.
+- `POST /api/profiles/{username}/follow` and `DELETE /api/profiles/{username}/follow` allow authenticated users to follow and unfollow other users.
 - Articles, comments, and other RealWorld endpoints are not yet built.
