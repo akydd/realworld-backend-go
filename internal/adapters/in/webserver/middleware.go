@@ -3,6 +3,7 @@ package webserver
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/golang-jwt/jwt/v5"
@@ -10,7 +11,7 @@ import (
 
 type contextKey string
 
-const usernameKey contextKey = "username"
+const userIDKey contextKey = "userID"
 
 func optionalAuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 	return func(next http.Handler) http.Handler {
@@ -27,8 +28,10 @@ func optionalAuthMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 				})
 				if err == nil && token.Valid {
 					if claims, ok := token.Claims.(*jwt.RegisteredClaims); ok && claims.Subject != "" {
-						ctx := context.WithValue(r.Context(), usernameKey, claims.Subject)
-						r = r.WithContext(ctx)
+						if userID, err := strconv.Atoi(claims.Subject); err == nil {
+							ctx := context.WithValue(r.Context(), userIDKey, userID)
+							r = r.WithContext(ctx)
+						}
 					}
 				}
 			}
@@ -71,7 +74,14 @@ func authMiddleware(jwtSecret string) func(http.Handler) http.Handler {
 				return
 			}
 
-			ctx := context.WithValue(r.Context(), usernameKey, claims.Subject)
+			userID, err := strconv.Atoi(claims.Subject)
+			if err != nil {
+				w.WriteHeader(http.StatusUnauthorized)
+				_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+				return
+			}
+
+			ctx := context.WithValue(r.Context(), userIDKey, userID)
 			next.ServeHTTP(w, r.WithContext(ctx))
 		})
 	}

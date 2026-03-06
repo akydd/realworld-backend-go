@@ -79,6 +79,7 @@ func New(config *DBConfig) (*Postgres, error) {
 }
 
 type user struct {
+	ID       int            `db:"id"`
 	Email    string         `db:"email"`
 	Username string         `db:"username"`
 	Bio      sql.NullString `db:"bio"`
@@ -92,6 +93,7 @@ type userWithPassword struct {
 
 func convertUser(u user) domain.User {
 	d := domain.User{
+		ID:       u.ID,
 		Username: u.Username,
 		Email:    u.Email,
 	}
@@ -109,11 +111,11 @@ func convertUser(u user) domain.User {
 	return d
 }
 
-func (p *Postgres) GetProfileByUsername(ctx context.Context, username string) (*domain.Profile, error) {
-	query := "SELECT username, bio, image FROM users WHERE username = $1"
+func (p *Postgres) GetProfileByUsername(ctx context.Context, profileUsername string) (*domain.Profile, error) {
+	query := "SELECT id, username, bio, image FROM users WHERE username = $1"
 	var dbUser user
 
-	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+	err := p.db.QueryRowxContext(ctx, query, profileUsername).StructScan(&dbUser)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &domain.ProfileNotFoundError{}
@@ -137,11 +139,11 @@ func (p *Postgres) GetProfileByUsername(ctx context.Context, username string) (*
 	return &profile, nil
 }
 
-func (p *Postgres) GetUserByUsername(ctx context.Context, username string) (*domain.User, error) {
-	query := "SELECT username, email, bio, image FROM users WHERE username = $1"
+func (p *Postgres) GetUserByID(ctx context.Context, id int) (*domain.User, error) {
+	query := "SELECT id, username, email, bio, image FROM users WHERE id = $1"
 	var dbUser user
 
-	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+	err := p.db.QueryRowxContext(ctx, query, id).StructScan(&dbUser)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, &domain.CredentialsError{}
@@ -153,11 +155,11 @@ func (p *Postgres) GetUserByUsername(ctx context.Context, username string) (*dom
 	return &u, nil
 }
 
-func (p *Postgres) GetFullUserByUsername(ctx context.Context, username string) (*domain.User, string, error) {
-	query := "SELECT username, email, bio, image, password FROM users WHERE username = $1"
+func (p *Postgres) GetFullUserByID(ctx context.Context, id int) (*domain.User, string, error) {
+	query := "SELECT id, username, email, bio, image, password FROM users WHERE id = $1"
 	var dbUser userWithPassword
 
-	err := p.db.QueryRowxContext(ctx, query, username).StructScan(&dbUser)
+	err := p.db.QueryRowxContext(ctx, query, id).StructScan(&dbUser)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, "", &domain.CredentialsError{}
@@ -169,11 +171,11 @@ func (p *Postgres) GetFullUserByUsername(ctx context.Context, username string) (
 	return &u, dbUser.Password, nil
 }
 
-func (p *Postgres) UpdateUser(ctx context.Context, currentUsername string, u *domain.UpdateUserData) (*domain.User, error) {
-	query := `UPDATE users SET email=$1, username=$2, password=$3, bio=$4, image=$5 WHERE username=$6 RETURNING username, email, bio, image`
+func (p *Postgres) UpdateUser(ctx context.Context, userID int, u *domain.UpdateUserData) (*domain.User, error) {
+	query := `UPDATE users SET email=$1, username=$2, password=$3, bio=$4, image=$5 WHERE id=$6 RETURNING id, username, email, bio, image`
 	var dbUser user
 
-	err := p.db.QueryRowxContext(ctx, query, u.Email, u.Username, u.Password, u.Bio, u.Image, currentUsername).StructScan(&dbUser)
+	err := p.db.QueryRowxContext(ctx, query, u.Email, u.Username, u.Password, u.Bio, u.Image, userID).StructScan(&dbUser)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
@@ -192,7 +194,7 @@ func (p *Postgres) UpdateUser(ctx context.Context, currentUsername string, u *do
 }
 
 func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.User, string, error) {
-	query := "SELECT username, email, bio, image, password FROM users WHERE email = $1"
+	query := "SELECT id, username, email, bio, image, password FROM users WHERE email = $1"
 	var dbUser userWithPassword
 
 	err := p.db.QueryRowxContext(ctx, query, email).StructScan(&dbUser)
@@ -208,7 +210,7 @@ func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.Us
 }
 
 func (p *Postgres) InsertUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error) {
-	query := "insert into users (username, email, password) values ($1, $2, $3) returning username, email, bio, image"
+	query := "insert into users (username, email, password) values ($1, $2, $3) returning id, username, email, bio, image"
 	var dbUser user
 
 	err := p.db.QueryRowxContext(ctx, query, u.Username, u.Email, u.Password).StructScan(&dbUser)

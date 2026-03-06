@@ -14,12 +14,12 @@ import (
 type userService interface {
 	RegisterUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error)
 	LoginUser(ctx context.Context, u *domain.LoginUser) (*domain.User, error)
-	GetUser(ctx context.Context, username string) (*domain.User, error)
-	UpdateUser(ctx context.Context, username string, u *domain.UpdateUser) (*domain.User, error)
+	GetUser(ctx context.Context, userID int) (*domain.User, error)
+	UpdateUser(ctx context.Context, userID int, u *domain.UpdateUser) (*domain.User, error)
 }
 
 type profileService interface {
-	GetProfile(ctx context.Context, profileUsername string, viewerUsername string) (*domain.Profile, error)
+	GetProfile(ctx context.Context, profileUsername string) (*domain.Profile, error)
 }
 
 type Handler struct {
@@ -136,7 +136,13 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := UserResponse{
-		User: UserResponseInner(*user),
+		User: UserResponseInner{
+			Email:    user.Email,
+			Token:    user.Token,
+			Username: user.Username,
+			Bio:      user.Bio,
+			Image:    user.Image,
+		},
 	}
 	w.WriteHeader(http.StatusCreated)
 	_ = json.NewEncoder(w).Encode(resp)
@@ -175,16 +181,22 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := UserResponse{
-		User: UserResponseInner(*user),
+		User: UserResponseInner{
+			Email:    user.Email,
+			Token:    user.Token,
+			Username: user.Username,
+			Bio:      user.Bio,
+			Image:    user.Image,
+		},
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
-	username := r.Context().Value(usernameKey).(string)
+	userID := r.Context().Value(userIDKey).(int)
 
-	user, err := h.service.GetUser(r.Context(), username)
+	user, err := h.service.GetUser(r.Context(), userID)
 	if err != nil {
 		var credErr *domain.CredentialsError
 		if errors.As(err, &credErr) {
@@ -199,14 +211,20 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := UserResponse{
-		User: UserResponseInner(*user),
+		User: UserResponseInner{
+			Email:    user.Email,
+			Token:    user.Token,
+			Username: user.Username,
+			Bio:      user.Bio,
+			Image:    user.Image,
+		},
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
-	username := r.Context().Value(usernameKey).(string)
+	userID := r.Context().Value(userIDKey).(int)
 
 	var req UpdateUserRequest
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -234,7 +252,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 		}
 	}
 
-	user, err := h.service.UpdateUser(r.Context(), username, &d)
+	user, err := h.service.UpdateUser(r.Context(), userID, &d)
 	if err != nil {
 		var validationErr *domain.ValidationError
 		var credErr *domain.CredentialsError
@@ -257,7 +275,13 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	}
 
 	resp := UserResponse{
-		User: UserResponseInner(*user),
+		User: UserResponseInner{
+			Email:    user.Email,
+			Token:    user.Token,
+			Username: user.Username,
+			Bio:      user.Bio,
+			Image:    user.Image,
+		},
 	}
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(resp)
@@ -276,11 +300,10 @@ type ProfileResponse struct {
 
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	profileUsername := mux.Vars(r)["username"]
-	viewerUsername, _ := r.Context().Value(usernameKey).(string)
 
 	w.Header().Set("Content-Type", "application/json")
 
-	profile, err := h.profileService.GetProfile(r.Context(), profileUsername, viewerUsername)
+	profile, err := h.profileService.GetProfile(r.Context(), profileUsername)
 	if err != nil {
 		var notFoundErr *domain.ProfileNotFoundError
 		if errors.As(err, &notFoundErr) {
