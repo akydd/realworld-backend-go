@@ -19,7 +19,9 @@ type userService interface {
 }
 
 type profileService interface {
-	GetProfile(ctx context.Context, profileUsername string) (*domain.Profile, error)
+	GetProfile(ctx context.Context, profileUsername string, viewerID int) (*domain.Profile, error)
+	FollowUser(ctx context.Context, followerID int, followeeUsername string) (*domain.Profile, error)
+	UnfollowUser(ctx context.Context, followerID int, followeeUsername string) (*domain.Profile, error)
 }
 
 type Handler struct {
@@ -298,26 +300,8 @@ type ProfileResponse struct {
 	Profile ProfileResponseInner `json:"profile"`
 }
 
-func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
-	profileUsername := mux.Vars(r)["username"]
-
-	w.Header().Set("Content-Type", "application/json")
-
-	profile, err := h.profileService.GetProfile(r.Context(), profileUsername)
-	if err != nil {
-		var notFoundErr *domain.ProfileNotFoundError
-		if errors.As(err, &notFoundErr) {
-			w.WriteHeader(http.StatusNotFound)
-			_, _ = w.Write(createErrResponse("profile", []string{"not found"}))
-		} else {
-			fmt.Println(err.Error())
-			w.WriteHeader(http.StatusInternalServerError)
-			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
-		}
-		return
-	}
-
-	resp := ProfileResponse{
+func profileResponse(profile *domain.Profile) ProfileResponse {
+	return ProfileResponse{
 		Profile: ProfileResponseInner{
 			Username:  profile.Username,
 			Bio:       profile.Bio,
@@ -325,8 +309,66 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 			Following: profile.Following,
 		},
 	}
+}
+
+func writeProfileErr(w http.ResponseWriter, err error) {
+	var notFoundErr *domain.ProfileNotFoundError
+	if errors.As(err, &notFoundErr) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write(createErrResponse("profile", []string{"not found"}))
+	} else {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+	}
+}
+
+func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
+	profileUsername := mux.Vars(r)["username"]
+	viewerID, _ := r.Context().Value(userIDKey).(int)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	profile, err := h.profileService.GetProfile(r.Context(), profileUsername, viewerID)
+	if err != nil {
+		writeProfileErr(w, err)
+		return
+	}
+
 	w.WriteHeader(http.StatusOK)
-	_ = json.NewEncoder(w).Encode(resp)
+	_ = json.NewEncoder(w).Encode(profileResponse(profile))
+}
+
+func (h *Handler) FollowUser(w http.ResponseWriter, r *http.Request) {
+	followerID := r.Context().Value(userIDKey).(int)
+	followeeUsername := mux.Vars(r)["username"]
+
+	w.Header().Set("Content-Type", "application/json")
+
+	profile, err := h.profileService.FollowUser(r.Context(), followerID, followeeUsername)
+	if err != nil {
+		writeProfileErr(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(profileResponse(profile))
+}
+
+func (h *Handler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
+	followerID := r.Context().Value(userIDKey).(int)
+	followeeUsername := mux.Vars(r)["username"]
+
+	w.Header().Set("Content-Type", "application/json")
+
+	profile, err := h.profileService.UnfollowUser(r.Context(), followerID, followeeUsername)
+	if err != nil {
+		writeProfileErr(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(profileResponse(profile))
 }
 
 func createErrResponse(k string, v []string) []byte {

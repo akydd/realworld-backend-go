@@ -21,6 +21,8 @@ type ServerHandlers interface {
 	GetUser(http.ResponseWriter, *http.Request)
 	UpdateUser(http.ResponseWriter, *http.Request)
 	GetProfile(http.ResponseWriter, *http.Request)
+	FollowUser(http.ResponseWriter, *http.Request)
+	UnfollowUser(http.ResponseWriter, *http.Request)
 }
 
 func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error) {
@@ -32,6 +34,8 @@ func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error)
 	protected.Use(authMiddleware(jwtSecret))
 	protected.HandleFunc("/api/user", h.GetUser).Methods("GET")
 	protected.HandleFunc("/api/user", h.UpdateUser).Methods("PUT")
+	protected.HandleFunc("/api/profiles/{username}/follow", h.FollowUser).Methods("POST")
+	protected.HandleFunc("/api/profiles/{username}/follow", h.UnfollowUser).Methods("DELETE")
 
 	optionalAuth := r.NewRoute().Subrouter()
 	optionalAuth.Use(optionalAuthMiddleware(jwtSecret))
