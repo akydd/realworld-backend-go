@@ -23,7 +23,8 @@ realworld-backend-go/
 │           ├── postgres.go           # sqlx-based repository
 │           └── migrations/
 │               ├── 001_create_users.sql
-│               └── 002_unique_users.sql
+│               ├── 002_unique_users.sql
+│               └── 003_create_follows.sql
 ├── compose.yaml                      # Docker Compose (prod DB)
 ├── compose.test.yaml                 # Docker Compose (test DB)
 ├── Makefile                          # make int-tests runner
@@ -37,8 +38,8 @@ realworld-backend-go/
 Pure Go with no framework dependencies. Contains:
 - **`UserController`**: Orchestrates user registration — validates input, hashes password with Argon2ID, calls the repository, returns a domain `User`. JWTs use the user's immutable integer `ID` as the `sub` claim (stored as a decimal string per the JWT spec).
 - **`userRepo` interface**: Decouples domain from persistence. The DB adapter implements this. Key methods: `InsertUser`, `GetUserByEmail`, `GetUserByID`, `GetFullUserByID`, `UpdateUser`.
-- **`ProfileController`**: Handles profile lookups. Always returns `following: false` on this branch (the `follows` table is not present; follow/unfollow support will be merged from the `8-follow-user` branch).
-- **`profileRepo` interface**: Decouples profile domain from persistence. Method: `GetProfileByUsername(profileUsername string)`.
+- **`ProfileController`**: Handles profile lookups and follow/unfollow operations. Methods: `GetProfile(ctx, profileUsername, viewerID)`, `FollowUser(ctx, followerID, followeeUsername)`, `UnfollowUser(ctx, followerID, followeeUsername)`. Returns actual `following` status.
+- **`profileRepo` interface**: Decouples profile domain from persistence. Methods: `GetProfileByUsername(ctx, profileUsername, viewerID)`, `FollowUser(ctx, followerID, followeeUsername)`, `UnfollowUser(ctx, followerID, followeeUsername)`.
 - **`ValidationError`**: Structured field-level validation errors for HTTP consumers.
 - **`DuplicateError`**: Error type returned when a unique constraint is violated. Carries the `Field` name and a fixed message (`"has already been taken"`).
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
@@ -59,8 +60,10 @@ Handles the HTTP protocol layer:
 | GET | `/api/user` | Get the authenticated user |
 | PUT | `/api/user` | Update the authenticated user |
 | GET | `/api/profiles/{username}` | Get a user's public profile (auth optional) |
+| POST | `/api/profiles/{username}/follow` | Follow a user (auth required) |
+| DELETE | `/api/profiles/{username}/follow` | Unfollow a user (auth required) |
 
-**Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
+**Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
 
 ### Outbound Adapter — Database (`internal/adapters/out/db/`)
 PostgreSQL persistence via `sqlx`:
@@ -71,7 +74,9 @@ PostgreSQL persistence via `sqlx`:
 - `GetUserByID()` fetches a user by ID. Returns `*domain.CredentialsError` when no row is found.
 - `GetFullUserByID()` fetches a user and their hashed password by ID. Returns `*domain.CredentialsError` when no row is found.
 - `UpdateUser()` updates all user fields by user ID and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
-- `GetProfileByUsername(profileUsername)` fetches a user's public profile fields by username. Always returns `following=false` on this branch. Returns `*domain.ProfileNotFoundError` when no row is found.
+- `GetProfileByUsername(ctx, profileUsername, viewerID)` fetches a user's public profile fields by username using a LEFT JOIN on `follows` to compute the real `following` status for the viewer. Pass `viewerID=0` for unauthenticated requests. Returns `*domain.ProfileNotFoundError` when no row is found.
+- `FollowUser(ctx, followerID, followeeUsername)` inserts a row into `follows` (idempotent via `ON CONFLICT DO NOTHING`) and returns the profile with `following=true`. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
+- `UnfollowUser(ctx, followerID, followeeUsername)` deletes the corresponding `follows` row and returns the profile with `following=false`. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -82,6 +87,12 @@ PostgreSQL persistence via `sqlx`:
 | password | VARCHAR(100) | Argon2ID hash |
 | bio | TEXT | Optional |
 | image | VARCHAR(100) | Optional (profile picture URL) |
+
+**Schema (`follows` table):**
+| Column | Type | Notes |
+|--------|------|-------|
+| follower_id | INTEGER | FK → users.id, part of PK |
+| followee_id | INTEGER | FK → users.id, part of PK |
 
 ## Key Dependencies
 
@@ -132,10 +143,11 @@ The server accepts a `-env` flag (default `.env`) to select the env file at star
 
 ## Current State
 
-The project implements user **registration**, **login**, **get current user**, **update current user**, and **get profile**. Notable gaps:
+The project implements user **registration**, **login**, **get current user**, **update current user**, **get profile**, **follow user**, and **unfollow user**. Notable details:
 - Registered and logged-in users receive a signed HS256 JWT (claims: `sub`=user ID as decimal string, 72h expiry). Using the immutable user ID means tokens remain valid even if the user changes their username.
 - `GET /api/user` and `PUT /api/user` are protected by `authMiddleware`, which centralises both token extraction and JWT validation. The domain service receives the authenticated user ID (int) directly and no longer handles tokens.
 - `PUT /api/user` supports partial updates (all fields optional); fetches current values, applies changes, and writes all fields back in one query.
 - Future protected routes can be added to the protected subrouter with a single line; optionally-authenticated routes go on the optional-auth subrouter.
-- `GET /api/profiles/{username}` always returns `following: false`; follow/unfollow endpoints are not yet built.
+- `GET /api/profiles/{username}` returns the real `following` status for an authenticated viewer, or `false` for unauthenticated requests.
+- `POST /api/profiles/{username}/follow` and `DELETE /api/profiles/{username}/follow` are protected endpoints that create/remove rows in the `follows` table.
 - Articles, comments, and other RealWorld endpoints are not yet built.

@@ -7,8 +7,9 @@ services:
       POSTGRES_PASSWORD: password
       POSTGRES_USER: admin
       POSTGRES_DB: app
+      PGDATA: /var/lib/postgresql/data
     volumes:
-      - app-data:/var/lib/postgres
+      - app-data:/var/lib/postgresql/data
     ports:
       - 8095:5432
 
