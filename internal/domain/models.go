@@ -1,5 +1,7 @@
 package domain
 
+import "time"
+
 type RegisterUser struct {
 	Username string
 	Email    string
@@ -41,4 +43,23 @@ type UpdateUserData struct {
 	Password string
 	Bio      *string
 	Image    *string
+}
+
+type Article struct {
+	Slug           string
+	Title          string
+	Description    string
+	Body           string
+	TagList        []string
+	CreatedAt      time.Time
+	UpdatedAt      time.Time
+	Favorited      bool
+	FavoritesCount int
+	Author         Profile
+}
+
+type CreateArticle struct {
+	Title       string
+	Description string
+	Body        string
 }

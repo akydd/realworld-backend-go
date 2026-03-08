@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"realworld-backend-go/internal/domain"
+	"time"
 
 	"github.com/gorilla/mux"
 )
@@ -24,15 +25,21 @@ type profileService interface {
 	UnfollowUser(ctx context.Context, followerID int, followeeUsername string) (*domain.Profile, error)
 }
 
+type articleService interface {
+	CreateArticle(ctx context.Context, authorID int, a *domain.CreateArticle) (*domain.Article, error)
+}
+
 type Handler struct {
 	service        userService
 	profileService profileService
+	articleService articleService
 }
 
-func NewHandler(s userService, ps profileService) *Handler {
+func NewHandler(s userService, ps profileService, as articleService) *Handler {
 	return &Handler{
 		service:        s,
 		profileService: ps,
+		articleService: as,
 	}
 }
 
@@ -369,6 +376,102 @@ func (h *Handler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(profileResponse(profile))
+}
+
+type CreateArticleInner struct {
+	Title       string   `json:"title"`
+	Description string   `json:"description"`
+	Body        string   `json:"body"`
+	TagList     []string `json:"tagList"`
+}
+
+type CreateArticleRequest struct {
+	Article CreateArticleInner `json:"article"`
+}
+
+type ArticleAuthor struct {
+	Username  string  `json:"username"`
+	Bio       *string `json:"bio"`
+	Image     *string `json:"image"`
+	Following bool    `json:"following"`
+}
+
+type ArticleResponseInner struct {
+	Slug           string        `json:"slug"`
+	Title          string        `json:"title"`
+	Description    string        `json:"description"`
+	Body           string        `json:"body"`
+	TagList        []string      `json:"tagList"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	UpdatedAt      time.Time     `json:"updatedAt"`
+	Favorited      bool          `json:"favorited"`
+	FavoritesCount int           `json:"favoritesCount"`
+	Author         ArticleAuthor `json:"author"`
+}
+
+type ArticleResponse struct {
+	Article ArticleResponseInner `json:"article"`
+}
+
+func articleResponse(a *domain.Article) ArticleResponse {
+	return ArticleResponse{
+		Article: ArticleResponseInner{
+			Slug:           a.Slug,
+			Title:          a.Title,
+			Description:    a.Description,
+			Body:           a.Body,
+			TagList:        a.TagList,
+			CreatedAt:      a.CreatedAt,
+			UpdatedAt:      a.UpdatedAt,
+			Favorited:      a.Favorited,
+			FavoritesCount: a.FavoritesCount,
+			Author: ArticleAuthor{
+				Username:  a.Author.Username,
+				Bio:       a.Author.Bio,
+				Image:     a.Author.Image,
+				Following: a.Author.Following,
+			},
+		},
+	}
+}
+
+func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
+	authorID := r.Context().Value(userIDKey).(int)
+
+	var req CreateArticleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	d := domain.CreateArticle{
+		Title:       req.Article.Title,
+		Description: req.Article.Description,
+		Body:        req.Article.Body,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	article, err := h.articleService.CreateArticle(r.Context(), authorID, &d)
+	if err != nil {
+		var validationErr *domain.ValidationError
+		var dupErr *domain.DuplicateError
+		if errors.As(err, &validationErr) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write(createErrResponse(validationErr.Field, validationErr.Errors))
+		} else if errors.As(err, &dupErr) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write(createErrResponse(dupErr.Field, []string{dupErr.Msg}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
 func createErrResponse(k string, v []string) []byte {

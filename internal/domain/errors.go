@@ -53,3 +53,9 @@ type ProfileNotFoundError struct{}
 func (p *ProfileNotFoundError) Error() string {
 	return "profile not found"
 }
+
+type ArticleNotFoundError struct{}
+
+func (a *ArticleNotFoundError) Error() string {
+	return "article not found"
+}

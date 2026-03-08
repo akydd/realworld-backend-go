@@ -4,6 +4,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"time"
 
 	"embed"
 	"fmt"
@@ -262,6 +263,70 @@ func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.Us
 
 	user := convertUser(dbUser.user)
 	return &user, dbUser.Password, nil
+}
+
+type articleRow struct {
+	ID          int       `db:"id"`
+	Slug        string    `db:"slug"`
+	Title       string    `db:"title"`
+	Description string    `db:"description"`
+	Body        string    `db:"body"`
+	AuthorID    int       `db:"author_id"`
+	CreatedAt   time.Time `db:"created_at"`
+	UpdatedAt   time.Time `db:"updated_at"`
+}
+
+func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string, a *domain.CreateArticle) (*domain.Article, error) {
+	query := `
+		INSERT INTO articles (slug, title, description, body, author_id)
+		VALUES ($1, $2, $3, $4, $5)
+		RETURNING id, slug, title, description, body, author_id, created_at, updated_at`
+	var row articleRow
+
+	err := p.db.QueryRowxContext(ctx, query, slug, a.Title, a.Description, a.Body, authorID).StructScan(&row)
+	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			switch pqErr.Constraint {
+			case "articles_title_unique", "articles_slug_unique":
+				return nil, domain.NewDuplicateError("title")
+			}
+		}
+		return nil, err
+	}
+
+	var authorRow struct {
+		Username string         `db:"username"`
+		Bio      sql.NullString `db:"bio"`
+		Image    sql.NullString `db:"image"`
+	}
+	err = p.db.QueryRowxContext(ctx, "SELECT username, bio, image FROM users WHERE id = $1", authorID).StructScan(&authorRow)
+	if err != nil {
+		return nil, err
+	}
+
+	author := domain.Profile{Username: authorRow.Username, Following: false}
+	if authorRow.Bio.Valid {
+		s := authorRow.Bio.String
+		author.Bio = &s
+	}
+	if authorRow.Image.Valid {
+		s := authorRow.Image.String
+		author.Image = &s
+	}
+
+	return &domain.Article{
+		Slug:           row.Slug,
+		Title:          row.Title,
+		Description:    row.Description,
+		Body:           row.Body,
+		TagList:        []string{},
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+		Favorited:      false,
+		FavoritesCount: 0,
+		Author:         author,
+	}, nil
 }
 
 func (p *Postgres) InsertUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error) {
