@@ -75,8 +75,8 @@ PostgreSQL persistence via `sqlx`:
 - `GetFullUserByID()` fetches a user and their hashed password by ID. Returns `*domain.CredentialsError` when no row is found.
 - `UpdateUser()` updates all user fields by user ID and returns the updated record via `RETURNING`. Maps unique-violation errors to `*domain.DuplicateError`.
 - `GetProfileByUsername(ctx, profileUsername, viewerID)` fetches a user's public profile fields by username using a LEFT JOIN on `follows` to compute the real `following` status for the viewer. Pass `viewerID=0` for unauthenticated requests. Returns `*domain.ProfileNotFoundError` when no row is found.
-- `FollowUser(ctx, followerID, followeeUsername)` inserts a row into `follows` (idempotent via `ON CONFLICT DO NOTHING`) and returns the profile with `following=true`. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
-- `UnfollowUser(ctx, followerID, followeeUsername)` deletes the corresponding `follows` row and returns the profile with `following=false`. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
+- `FollowUser(ctx, followerID, followeeUsername)` inserts a row into `follows` (idempotent via `ON CONFLICT DO NOTHING`) then calls `GetProfileByUsername` to return the full profile. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
+- `UnfollowUser(ctx, followerID, followeeUsername)` deletes the corresponding `follows` row then calls `GetProfileByUsername` to return the full profile. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
 
 **Schema (`users` table):**
 | Column | Type | Notes |

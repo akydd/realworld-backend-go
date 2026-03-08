@@ -171,7 +171,7 @@ func (p *Postgres) FollowUser(ctx context.Context, followerID int, followeeUsern
 		return nil, err
 	}
 
-	return &domain.Profile{Username: followeeUsername, Following: true}, nil
+	return p.GetProfileByUsername(ctx, followeeUsername, followerID)
 }
 
 func (p *Postgres) UnfollowUser(ctx context.Context, followerID int, followeeUsername string) (*domain.Profile, error) {
@@ -191,7 +191,7 @@ func (p *Postgres) UnfollowUser(ctx context.Context, followerID int, followeeUse
 		return nil, err
 	}
 
-	return &domain.Profile{Username: followeeUsername, Following: false}, nil
+	return p.GetProfileByUsername(ctx, followeeUsername, followerID)
 }
 
 func (p *Postgres) GetUserByID(ctx context.Context, id int) (*domain.User, error) {

@@ -99,14 +99,14 @@ Pass `viewerID = 0` when the viewer is unauthenticated — no row in `follows` w
 Use a new local DB scan struct that includes a `Following bool` field with `db:"following"` tag.
 
 **Add `FollowUser`**:
-1. Look up followee by username — return `&domain.ProfileNotFoundError{}` on `sql.ErrNoRows`.
+1. Look up followee ID by username — return `&domain.ProfileNotFoundError{}` on `sql.ErrNoRows`.
 2. `INSERT INTO follows (follower_id, followee_id) VALUES ($1, $2) ON CONFLICT DO NOTHING` (idempotent).
-3. Return the profile with `following: true`.
+3. Call `GetProfileByUsername(ctx, followeeUsername, followerID)` to return the full profile (all fields including `bio` and `image`) with `following: true`.
 
 **Add `UnfollowUser`**:
-1. Look up followee by username — return `&domain.ProfileNotFoundError{}` on `sql.ErrNoRows`.
+1. Look up followee ID by username — return `&domain.ProfileNotFoundError{}` on `sql.ErrNoRows`.
 2. `DELETE FROM follows WHERE follower_id = $1 AND followee_id = $2`.
-3. Return the profile with `following: false`.
+3. Call `GetProfileByUsername(ctx, followeeUsername, followerID)` to return the full profile (all fields including `bio` and `image`) with `following: false`.
 
 ### 4. `internal/adapters/in/webserver/handlers.go`
 
