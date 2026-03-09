@@ -28,6 +28,7 @@ type profileService interface {
 type articleService interface {
 	CreateArticle(ctx context.Context, authorID int, a *domain.CreateArticle) (*domain.Article, error)
 	GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*domain.Article, error)
+	UpdateArticle(ctx context.Context, callerID int, slug string, u *domain.UpdateArticle) (*domain.Article, error)
 }
 
 type tagService interface {
@@ -503,6 +504,64 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 	article, err := h.articleService.GetArticleBySlug(r.Context(), slug, viewerID)
 	if err != nil {
 		writeArticleErr(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(articleResponse(article))
+}
+
+type UpdateArticleInner struct {
+	Title       *string `json:"title"`
+	Description *string `json:"description"`
+	Body        *string `json:"body"`
+}
+
+type UpdateArticleRequest struct {
+	Article UpdateArticleInner `json:"article"`
+}
+
+func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
+	callerID := r.Context().Value(userIDKey).(int)
+	slug := mux.Vars(r)["slug"]
+
+	var req UpdateArticleRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	u := domain.UpdateArticle{
+		Title:       req.Article.Title,
+		Description: req.Article.Description,
+		Body:        req.Article.Body,
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	article, err := h.articleService.UpdateArticle(r.Context(), callerID, slug, &u)
+	if err != nil {
+		var validationErr *domain.ValidationError
+		var notFoundErr *domain.ArticleNotFoundError
+		var dupErr *domain.DuplicateError
+		var credErr *domain.CredentialsError
+		if errors.As(err, &validationErr) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write(createErrResponse(validationErr.Field, validationErr.Errors))
+		} else if errors.As(err, &notFoundErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
+		} else if errors.As(err, &dupErr) {
+			w.WriteHeader(http.StatusConflict)
+			_, _ = w.Write(createErrResponse(dupErr.Field, []string{dupErr.Msg}))
+		} else if errors.As(err, &credErr) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
 		return
 	}
 

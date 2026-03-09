@@ -447,6 +447,71 @@ func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID i
 	}, nil
 }
 
+func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string, u *domain.UpdateArticle) (*domain.Article, error) {
+	tx, err := p.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
+	var cur struct {
+		ID          int    `db:"id"`
+		AuthorID    int    `db:"author_id"`
+		Title       string `db:"title"`
+		Description string `db:"description"`
+		Body        string `db:"body"`
+	}
+	err = tx.QueryRowxContext(ctx,
+		`SELECT id, author_id, title, description, body FROM articles WHERE slug = $1`,
+		slug).StructScan(&cur)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.ArticleNotFoundError{}
+		}
+		return nil, err
+	}
+
+	if cur.AuthorID != callerID {
+		return nil, &domain.CredentialsError{}
+	}
+
+	newTitle := cur.Title
+	newDescription := cur.Description
+	newBody := cur.Body
+	newSlug := slug
+
+	if u.Title != nil {
+		newTitle = *u.Title
+		newSlug = domain.GenerateSlug(newTitle)
+	}
+	if u.Description != nil {
+		newDescription = *u.Description
+	}
+	if u.Body != nil {
+		newBody = *u.Body
+	}
+
+	_, err = tx.ExecContext(ctx,
+		`UPDATE articles SET slug=$1, title=$2, description=$3, body=$4, updated_at=now() WHERE id=$5`,
+		newSlug, newTitle, newDescription, newBody, cur.ID)
+	if err != nil {
+		var pqErr *pq.Error
+		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
+			switch pqErr.Constraint {
+			case "articles_title_unique", "articles_slug_unique":
+				return nil, domain.NewDuplicateError("title")
+			}
+		}
+		return nil, err
+	}
+
+	if err = tx.Commit(); err != nil {
+		return nil, err
+	}
+
+	return p.GetArticleBySlug(ctx, newSlug, callerID)
+}
+
 func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	var tags []string
 	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)

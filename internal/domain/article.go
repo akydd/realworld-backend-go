@@ -8,7 +8,7 @@ import (
 
 var nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
 
-func generateSlug(title string) string {
+func GenerateSlug(title string) string {
 	lower := strings.ToLower(title)
 	slug := nonAlphanumRe.ReplaceAllString(lower, "-")
 	return strings.Trim(slug, "-")
@@ -39,9 +39,20 @@ func deduplicateTags(tags []string) []string {
 	return result
 }
 
+func validateUpdateArticle(u *UpdateArticle) error {
+	if u.Title == nil && u.Description == nil && u.Body == nil {
+		return NewValidationError("article", blankFieldErrMsg)
+	}
+	if u.Title != nil && *u.Title == "" {
+		return NewValidationError("title", blankFieldErrMsg)
+	}
+	return nil
+}
+
 type articleRepo interface {
 	InsertArticle(ctx context.Context, authorID int, slug string, a *CreateArticle) (*Article, error)
 	GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*Article, error)
+	UpdateArticle(ctx context.Context, callerID int, slug string, u *UpdateArticle) (*Article, error)
 }
 
 type ArticleController struct {
@@ -59,11 +70,18 @@ func (c *ArticleController) CreateArticle(ctx context.Context, authorID int, a *
 
 	a.TagList = deduplicateTags(a.TagList)
 
-	slug := generateSlug(a.Title)
+	slug := GenerateSlug(a.Title)
 
 	return c.repo.InsertArticle(ctx, authorID, slug, a)
 }
 
 func (c *ArticleController) GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*Article, error) {
 	return c.repo.GetArticleBySlug(ctx, slug, viewerID)
+}
+
+func (c *ArticleController) UpdateArticle(ctx context.Context, callerID int, slug string, u *UpdateArticle) (*Article, error) {
+	if err := validateUpdateArticle(u); err != nil {
+		return nil, err
+	}
+	return c.repo.UpdateArticle(ctx, callerID, slug, u)
 }

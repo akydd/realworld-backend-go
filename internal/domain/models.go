@@ -64,3 +64,9 @@ type CreateArticle struct {
 	Body        string
 	TagList     []string
 }
+
+type UpdateArticle struct {
+	Title       *string
+	Description *string
+	Body        *string
+}
