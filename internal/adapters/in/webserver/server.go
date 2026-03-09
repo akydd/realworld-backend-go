@@ -24,6 +24,7 @@ type ServerHandlers interface {
 	FollowUser(http.ResponseWriter, *http.Request)
 	UnfollowUser(http.ResponseWriter, *http.Request)
 	CreateArticle(http.ResponseWriter, *http.Request)
+	GetArticle(http.ResponseWriter, *http.Request)
 	GetTags(http.ResponseWriter, *http.Request)
 }
 
@@ -44,6 +45,7 @@ func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error)
 	optionalAuth := r.NewRoute().Subrouter()
 	optionalAuth.Use(optionalAuthMiddleware(jwtSecret))
 	optionalAuth.HandleFunc("/api/profiles/{username}", h.GetProfile).Methods("GET")
+	optionalAuth.HandleFunc("/api/articles/{slug}", h.GetArticle).Methods("GET")
 
 	// logging!
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)
