@@ -49,8 +49,8 @@ Pure Go with no framework dependencies. Contains:
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
 - **`ProfileNotFoundError`**: Error type returned when a profile lookup finds no matching user.
 - **`ArticleNotFoundError`**: Error type returned when an article lookup finds no matching article.
-- **`ArticleController`**: Handles article creation and retrieval. Validates input, deduplicates tags (first-occurrence wins), generates slug from title (kebab-case via regex), calls the repository. Methods: `CreateArticle(ctx, authorID, a)`, `GetArticleBySlug(ctx, slug, viewerID)`.
-- **`articleRepo` interface**: Decouples article domain from persistence. Methods: `InsertArticle(ctx, authorID, slug, a)`, `GetArticleBySlug(ctx, slug, viewerID)`.
+- **`ArticleController`**: Handles article creation, retrieval, and updates. Validates input, deduplicates tags (first-occurrence wins), generates slug from title via exported `GenerateSlug(title)` (kebab-case regex). Methods: `CreateArticle(ctx, authorID, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`.
+- **`articleRepo` interface**: Decouples article domain from persistence. Methods: `InsertArticle(ctx, authorID, slug, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`.
 - **`TagController`**: Handles tag listing. Method: `GetTags(ctx)`.
 - **`tagRepo` interface**: Decouples tag domain from persistence. Method: `GetAllTags(ctx)`.
 
@@ -73,6 +73,7 @@ Handles the HTTP protocol layer:
 | DELETE | `/api/profiles/{username}/follow` | Unfollow a user (auth required) |
 | POST | `/api/articles` | Create an article (auth required) |
 | GET | `/api/articles/{slug}` | Get an article by slug (auth optional) |
+| PUT | `/api/articles/{slug}` | Update an article (auth required, author only) |
 | GET | `/api/tags` | List all tags (no auth) |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
@@ -91,6 +92,7 @@ PostgreSQL persistence via `sqlx`:
 - `UnfollowUser(ctx, followerID, followeeUsername)` deletes the corresponding `follows` row then calls `GetProfileByUsername` to return the full profile. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
 - `InsertArticle(ctx, authorID, slug, a)` wraps all operations in a transaction. Inserts the article, upserts tags (via `INSERT ... ON CONFLICT DO NOTHING`), links tags to the article via `article_tags`, then fetches the author profile. Maps PostgreSQL unique-violation errors on `articles_title_unique` or `articles_slug_unique` to `*domain.DuplicateError{Field: "title"}`. Returns `TagList` from the (deduplicated) input; `Favorited` is always `false`, `FavoritesCount` is always `0`.
 - `GetArticleBySlug(ctx, slug, viewerID)` fetches a single article by slug in one query: JOINs `users` for the author, LEFT JOINs `follows` for the `following` status (`viewerID=0` always yields `false`), and LEFT JOINs `article_tags`+`tags` with `ARRAY_AGG` to collect the tag list. Returns `*domain.ArticleNotFoundError` when no row is found.
+- `UpdateArticle(ctx, callerID, slug, u)` wraps the update in a transaction: fetches the current article (→ `ArticleNotFoundError` if missing), checks `author_id == callerID` (→ `CredentialsError` if not), merges partial fields, recomputes slug via `domain.GenerateSlug` if title changed, runs `UPDATE`, maps unique-violation errors to `DuplicateError{Field: "title"}`, commits, then calls `GetArticleBySlug` to return the full response.
 - `GetAllTags(ctx)` returns all tag names ordered alphabetically. Returns `[]string{}` (never nil) when there are no tags.
 
 **Schema (`users` table):**
@@ -192,4 +194,5 @@ The project implements user **registration**, **login**, **get current user**, *
 - `POST /api/articles` creates an article; slug is generated from the title (kebab-case). `tagList` is stored in the `tags` and `article_tags` tables and returned in the response. `favorited` and `favoritesCount` are always `false`/`0`.
 - `GET /api/tags` returns all tags ordered alphabetically.
 - `GET /api/articles/{slug}` returns a single article by slug (auth optional); `author.following` reflects the viewer's follow state.
-- List, update, delete article and other RealWorld endpoints are not yet built.
+- `PUT /api/articles/{slug}` updates an article's title, description, and/or body (at least one required); title change regenerates the slug. Only the author may update; returns 401 otherwise.
+- List, delete article and other RealWorld endpoints are not yet built.
