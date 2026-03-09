@@ -53,6 +53,8 @@ type articleRepo interface {
 	InsertArticle(ctx context.Context, authorID int, slug string, a *CreateArticle) (*Article, error)
 	GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*Article, error)
 	UpdateArticle(ctx context.Context, callerID int, slug string, u *UpdateArticle) (*Article, error)
+	FavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
+	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
 }
 
 type ArticleController struct {
@@ -84,4 +86,12 @@ func (c *ArticleController) UpdateArticle(ctx context.Context, callerID int, slu
 		return nil, err
 	}
 	return c.repo.UpdateArticle(ctx, callerID, slug, u)
+}
+
+func (c *ArticleController) FavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error) {
+	return c.repo.FavoriteArticle(ctx, userID, slug)
+}
+
+func (c *ArticleController) UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error) {
+	return c.repo.UnfavoriteArticle(ctx, userID, slug)
 }

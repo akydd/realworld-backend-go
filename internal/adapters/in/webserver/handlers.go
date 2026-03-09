@@ -29,6 +29,8 @@ type articleService interface {
 	CreateArticle(ctx context.Context, authorID int, a *domain.CreateArticle) (*domain.Article, error)
 	GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*domain.Article, error)
 	UpdateArticle(ctx context.Context, callerID int, slug string, u *domain.UpdateArticle) (*domain.Article, error)
+	FavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
+	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
 }
 
 type tagService interface {
@@ -562,6 +564,38 @@ func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 			w.WriteHeader(http.StatusInternalServerError)
 			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
 		}
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(articleResponse(article))
+}
+
+func (h *Handler) FavoriteArticle(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(int)
+	slug := mux.Vars(r)["slug"]
+
+	w.Header().Set("Content-Type", "application/json")
+
+	article, err := h.articleService.FavoriteArticle(r.Context(), userID, slug)
+	if err != nil {
+		writeArticleErr(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(articleResponse(article))
+}
+
+func (h *Handler) UnfavoriteArticle(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(int)
+	slug := mux.Vars(r)["slug"]
+
+	w.Header().Set("Content-Type", "application/json")
+
+	article, err := h.articleService.UnfavoriteArticle(r.Context(), userID, slug)
+	if err != nil {
+		writeArticleErr(w, err)
 		return
 	}
 

@@ -382,6 +382,8 @@ type articleWithTagsRow struct {
 	AuthorImage    sql.NullString `db:"author_image"`
 	Following      bool           `db:"following"`
 	TagList        pq.StringArray `db:"tag_list"`
+	Favorited      bool           `db:"favorited"`
+	FavoritesCount int            `db:"favorites_count"`
 }
 
 func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*domain.Article, error) {
@@ -397,14 +399,17 @@ func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID i
 			u.bio       AS author_bio,
 			u.image     AS author_image,
 			CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS following,
-			COALESCE(ARRAY_AGG(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tag_list
+			COALESCE(ARRAY_AGG(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tag_list,
+			CASE WHEN fav.user_id IS NOT NULL THEN true ELSE false END AS favorited,
+			(SELECT COUNT(*) FROM article_favorites WHERE article_id = a.id) AS favorites_count
 		FROM articles a
 		JOIN users u ON u.id = a.author_id
 		LEFT JOIN follows f ON f.followee_id = a.author_id AND f.follower_id = $2
 		LEFT JOIN article_tags at ON at.article_id = a.id
 		LEFT JOIN tags t ON t.id = at.tag_id
+		LEFT JOIN article_favorites fav ON fav.article_id = a.id AND fav.user_id = $2
 		WHERE a.slug = $1
-		GROUP BY a.id, u.username, u.bio, u.image, f.follower_id`
+		GROUP BY a.id, u.username, u.bio, u.image, f.follower_id, fav.user_id`
 
 	var row articleWithTagsRow
 	err := p.db.QueryRowxContext(ctx, query, slug, viewerID).StructScan(&row)
@@ -441,10 +446,33 @@ func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID i
 		TagList:        tagList,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
-		Favorited:      false,
-		FavoritesCount: 0,
+		Favorited:      row.Favorited,
+		FavoritesCount: row.FavoritesCount,
 		Author:         author,
 	}, nil
+}
+
+func (p *Postgres) FavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error) {
+	_, err := p.db.ExecContext(ctx,
+		`INSERT INTO article_favorites (user_id, article_id)
+		 SELECT $1, id FROM articles WHERE slug = $2
+		 ON CONFLICT DO NOTHING`,
+		userID, slug)
+	if err != nil {
+		return nil, err
+	}
+	return p.GetArticleBySlug(ctx, slug, userID)
+}
+
+func (p *Postgres) UnfavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error) {
+	_, err := p.db.ExecContext(ctx,
+		`DELETE FROM article_favorites
+		 WHERE user_id = $1 AND article_id = (SELECT id FROM articles WHERE slug = $2)`,
+		userID, slug)
+	if err != nil {
+		return nil, err
+	}
+	return p.GetArticleBySlug(ctx, slug, userID)
 }
 
 func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string, u *domain.UpdateArticle) (*domain.Article, error) {
