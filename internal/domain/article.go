@@ -41,6 +41,7 @@ func deduplicateTags(tags []string) []string {
 
 type articleRepo interface {
 	InsertArticle(ctx context.Context, authorID int, slug string, a *CreateArticle) (*Article, error)
+	GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*Article, error)
 }
 
 type ArticleController struct {
@@ -61,4 +62,8 @@ func (c *ArticleController) CreateArticle(ctx context.Context, authorID int, a *
 	slug := generateSlug(a.Title)
 
 	return c.repo.InsertArticle(ctx, authorID, slug, a)
+}
+
+func (c *ArticleController) GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*Article, error) {
+	return c.repo.GetArticleBySlug(ctx, slug, viewerID)
 }

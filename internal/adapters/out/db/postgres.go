@@ -370,6 +370,83 @@ func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string,
 	}, nil
 }
 
+type articleWithTagsRow struct {
+	Slug           string         `db:"slug"`
+	Title          string         `db:"title"`
+	Description    string         `db:"description"`
+	Body           string         `db:"body"`
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
+	AuthorUsername string         `db:"author_username"`
+	AuthorBio      sql.NullString `db:"author_bio"`
+	AuthorImage    sql.NullString `db:"author_image"`
+	Following      bool           `db:"following"`
+	TagList        pq.StringArray `db:"tag_list"`
+}
+
+func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*domain.Article, error) {
+	query := `
+		SELECT
+			a.slug,
+			a.title,
+			a.description,
+			a.body,
+			a.created_at,
+			a.updated_at,
+			u.username  AS author_username,
+			u.bio       AS author_bio,
+			u.image     AS author_image,
+			CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS following,
+			COALESCE(ARRAY_AGG(t.name ORDER BY t.name) FILTER (WHERE t.name IS NOT NULL), '{}') AS tag_list
+		FROM articles a
+		JOIN users u ON u.id = a.author_id
+		LEFT JOIN follows f ON f.followee_id = a.author_id AND f.follower_id = $2
+		LEFT JOIN article_tags at ON at.article_id = a.id
+		LEFT JOIN tags t ON t.id = at.tag_id
+		WHERE a.slug = $1
+		GROUP BY a.id, u.username, u.bio, u.image, f.follower_id`
+
+	var row articleWithTagsRow
+	err := p.db.QueryRowxContext(ctx, query, slug, viewerID).StructScan(&row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.ArticleNotFoundError{}
+		}
+		return nil, err
+	}
+
+	author := domain.Profile{
+		Username:  row.AuthorUsername,
+		Following: row.Following,
+	}
+	if row.AuthorBio.Valid {
+		s := row.AuthorBio.String
+		author.Bio = &s
+	}
+	if row.AuthorImage.Valid {
+		s := row.AuthorImage.String
+		author.Image = &s
+	}
+
+	tagList := []string(row.TagList)
+	if tagList == nil {
+		tagList = []string{}
+	}
+
+	return &domain.Article{
+		Slug:           row.Slug,
+		Title:          row.Title,
+		Description:    row.Description,
+		Body:           row.Body,
+		TagList:        tagList,
+		CreatedAt:      row.CreatedAt,
+		UpdatedAt:      row.UpdatedAt,
+		Favorited:      false,
+		FavoritesCount: 0,
+		Author:         author,
+	}, nil
+}
+
 func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	var tags []string
 	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)

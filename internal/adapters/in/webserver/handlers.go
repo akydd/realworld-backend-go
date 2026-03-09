@@ -27,6 +27,7 @@ type profileService interface {
 
 type articleService interface {
 	CreateArticle(ctx context.Context, authorID int, a *domain.CreateArticle) (*domain.Article, error)
+	GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*domain.Article, error)
 }
 
 type tagService interface {
@@ -324,6 +325,18 @@ func profileResponse(profile *domain.Profile) ProfileResponse {
 	}
 }
 
+func writeArticleErr(w http.ResponseWriter, err error) {
+	var notFoundErr *domain.ArticleNotFoundError
+	if errors.As(err, &notFoundErr) {
+		w.WriteHeader(http.StatusNotFound)
+		_, _ = w.Write(createErrResponse("article", []string{"not found"}))
+	} else {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+	}
+}
+
 func writeProfileErr(w http.ResponseWriter, err error) {
 	var notFoundErr *domain.ProfileNotFoundError
 	if errors.As(err, &notFoundErr) {
@@ -478,6 +491,22 @@ func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(articleResponse(article))
+}
+
+func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
+	slug := mux.Vars(r)["slug"]
+	viewerID, _ := r.Context().Value(userIDKey).(int)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	article, err := h.articleService.GetArticleBySlug(r.Context(), slug, viewerID)
+	if err != nil {
+		writeArticleErr(w, err)
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
