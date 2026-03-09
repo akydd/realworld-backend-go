@@ -277,13 +277,19 @@ type articleRow struct {
 }
 
 func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string, a *domain.CreateArticle) (*domain.Article, error) {
+	tx, err := p.db.BeginTxx(ctx, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback() //nolint:errcheck
+
 	query := `
 		INSERT INTO articles (slug, title, description, body, author_id)
 		VALUES ($1, $2, $3, $4, $5)
 		RETURNING id, slug, title, description, body, author_id, created_at, updated_at`
 	var row articleRow
 
-	err := p.db.QueryRowxContext(ctx, query, slug, a.Title, a.Description, a.Body, authorID).StructScan(&row)
+	err = tx.QueryRowxContext(ctx, query, slug, a.Title, a.Description, a.Body, authorID).StructScan(&row)
 	if err != nil {
 		var pqErr *pq.Error
 		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
@@ -295,13 +301,43 @@ func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string,
 		return nil, err
 	}
 
+	if len(a.TagList) > 0 {
+		_, err = tx.ExecContext(ctx,
+			`INSERT INTO tags (name) SELECT unnest($1::text[]) ON CONFLICT (name) DO NOTHING`,
+			pq.Array(a.TagList))
+		if err != nil {
+			return nil, err
+		}
+
+		var tagIDs []int
+		err = tx.SelectContext(ctx, &tagIDs,
+			`SELECT id FROM tags WHERE name = ANY($1) ORDER BY array_position($1::text[], name)`,
+			pq.Array(a.TagList))
+		if err != nil {
+			return nil, err
+		}
+
+		for _, tagID := range tagIDs {
+			_, err = tx.ExecContext(ctx,
+				`INSERT INTO article_tags (article_id, tag_id) VALUES ($1, $2) ON CONFLICT DO NOTHING`,
+				row.ID, tagID)
+			if err != nil {
+				return nil, err
+			}
+		}
+	}
+
 	var authorRow struct {
 		Username string         `db:"username"`
 		Bio      sql.NullString `db:"bio"`
 		Image    sql.NullString `db:"image"`
 	}
-	err = p.db.QueryRowxContext(ctx, "SELECT username, bio, image FROM users WHERE id = $1", authorID).StructScan(&authorRow)
+	err = tx.QueryRowxContext(ctx, "SELECT username, bio, image FROM users WHERE id = $1", authorID).StructScan(&authorRow)
 	if err != nil {
+		return nil, err
+	}
+
+	if err = tx.Commit(); err != nil {
 		return nil, err
 	}
 
@@ -315,18 +351,35 @@ func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string,
 		author.Image = &s
 	}
 
+	tagList := a.TagList
+	if tagList == nil {
+		tagList = []string{}
+	}
+
 	return &domain.Article{
 		Slug:           row.Slug,
 		Title:          row.Title,
 		Description:    row.Description,
 		Body:           row.Body,
-		TagList:        []string{},
+		TagList:        tagList,
 		CreatedAt:      row.CreatedAt,
 		UpdatedAt:      row.UpdatedAt,
 		Favorited:      false,
 		FavoritesCount: 0,
 		Author:         author,
 	}, nil
+}
+
+func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
+	var tags []string
+	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)
+	if err != nil {
+		return nil, err
+	}
+	if tags == nil {
+		tags = []string{}
+	}
+	return tags, nil
 }
 
 func (p *Postgres) InsertUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error) {

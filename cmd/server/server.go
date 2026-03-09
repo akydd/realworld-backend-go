@@ -35,7 +35,8 @@ func main() {
 	userController := domain.New(database, os.Getenv("JWT_SECRET"))
 	profileController := domain.NewProfileController(database)
 	articleController := domain.NewArticleController(database)
-	handlers := webserver.NewHandler(userController, profileController, articleController)
+	tagController := domain.NewTagController(database)
+	handlers := webserver.NewHandler(userController, profileController, articleController, tagController)
 
 	port := os.Getenv("SERVER_PORT")
 

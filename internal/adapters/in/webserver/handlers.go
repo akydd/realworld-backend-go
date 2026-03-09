@@ -29,17 +29,23 @@ type articleService interface {
 	CreateArticle(ctx context.Context, authorID int, a *domain.CreateArticle) (*domain.Article, error)
 }
 
+type tagService interface {
+	GetTags(ctx context.Context) ([]string, error)
+}
+
 type Handler struct {
 	service        userService
 	profileService profileService
 	articleService articleService
+	tagService     tagService
 }
 
-func NewHandler(s userService, ps profileService, as articleService) *Handler {
+func NewHandler(s userService, ps profileService, as articleService, ts tagService) *Handler {
 	return &Handler{
 		service:        s,
 		profileService: ps,
 		articleService: as,
+		tagService:     ts,
 	}
 }
 
@@ -448,6 +454,7 @@ func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 		Title:       req.Article.Title,
 		Description: req.Article.Description,
 		Body:        req.Article.Body,
+		TagList:     req.Article.TagList,
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -482,4 +489,23 @@ func createErrResponse(k string, v []string) []byte {
 	}
 	jsonErrResp, _ := json.Marshal(errResp)
 	return jsonErrResp
+}
+
+type TagsResponse struct {
+	Tags []string `json:"tags"`
+}
+
+func (h *Handler) GetTags(w http.ResponseWriter, r *http.Request) {
+	w.Header().Set("Content-Type", "application/json")
+
+	tags, err := h.tagService.GetTags(r.Context())
+	if err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		return
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(TagsResponse{Tags: tags})
 }

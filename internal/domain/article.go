@@ -27,6 +27,18 @@ func validateCreateArticle(a *CreateArticle) error {
 	return nil
 }
 
+func deduplicateTags(tags []string) []string {
+	seen := make(map[string]bool)
+	result := make([]string, 0, len(tags))
+	for _, t := range tags {
+		if !seen[t] {
+			seen[t] = true
+			result = append(result, t)
+		}
+	}
+	return result
+}
+
 type articleRepo interface {
 	InsertArticle(ctx context.Context, authorID int, slug string, a *CreateArticle) (*Article, error)
 }
@@ -43,6 +55,8 @@ func (c *ArticleController) CreateArticle(ctx context.Context, authorID int, a *
 	if err := validateCreateArticle(a); err != nil {
 		return nil, err
 	}
+
+	a.TagList = deduplicateTags(a.TagList)
 
 	slug := generateSlug(a.Title)
 

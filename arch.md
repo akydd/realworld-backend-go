@@ -14,6 +14,8 @@ realworld-backend-go/
 │   │   ├── models.go                 # Core data models
 │   │   ├── user.go                   # UserController + userRepo interface
 │   │   ├── profile.go                # ProfileController + profileRepo interface
+│   │   ├── article.go                # ArticleController + articleRepo interface
+│   │   ├── tag.go                    # TagController + tagRepo interface
 │   │   └── errors.go                 # ValidationError type
 │   └── adapters/
 │       ├── in/webserver/             # Inbound: HTTP
@@ -25,7 +27,8 @@ realworld-backend-go/
 │               ├── 001_create_users.sql
 │               ├── 002_unique_users.sql
 │               ├── 003_create_follows.sql
-│               └── 004_create_articles.sql
+│               ├── 004_create_articles.sql
+│               └── 005_create_tags.sql
 ├── compose.yaml                      # Docker Compose (prod DB)
 ├── compose.test.yaml                 # Docker Compose (test DB)
 ├── Makefile                          # make int-tests runner
@@ -46,8 +49,10 @@ Pure Go with no framework dependencies. Contains:
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
 - **`ProfileNotFoundError`**: Error type returned when a profile lookup finds no matching user.
 - **`ArticleNotFoundError`**: Error type returned when an article lookup finds no matching article.
-- **`ArticleController`**: Handles article creation. Validates input, generates slug from title (kebab-case via regex), calls the repository. Method: `CreateArticle(ctx, authorID, a)`.
+- **`ArticleController`**: Handles article creation. Validates input, deduplicates tags (first-occurrence wins), generates slug from title (kebab-case via regex), calls the repository. Method: `CreateArticle(ctx, authorID, a)`.
 - **`articleRepo` interface**: Decouples article domain from persistence. Method: `InsertArticle(ctx, authorID, slug, a)`.
+- **`TagController`**: Handles tag listing. Method: `GetTags(ctx)`.
+- **`tagRepo` interface**: Decouples tag domain from persistence. Method: `GetAllTags(ctx)`.
 
 ### Inbound Adapter — HTTP (`internal/adapters/in/webserver/`)
 Handles the HTTP protocol layer:
@@ -67,6 +72,7 @@ Handles the HTTP protocol layer:
 | POST | `/api/profiles/{username}/follow` | Follow a user (auth required) |
 | DELETE | `/api/profiles/{username}/follow` | Unfollow a user (auth required) |
 | POST | `/api/articles` | Create an article (auth required) |
+| GET | `/api/tags` | List all tags (no auth) |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
 
@@ -82,7 +88,8 @@ PostgreSQL persistence via `sqlx`:
 - `GetProfileByUsername(ctx, profileUsername, viewerID)` fetches a user's public profile fields by username using a LEFT JOIN on `follows` to compute the real `following` status for the viewer. Pass `viewerID=0` for unauthenticated requests. Returns `*domain.ProfileNotFoundError` when no row is found.
 - `FollowUser(ctx, followerID, followeeUsername)` inserts a row into `follows` (idempotent via `ON CONFLICT DO NOTHING`) then calls `GetProfileByUsername` to return the full profile. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
 - `UnfollowUser(ctx, followerID, followeeUsername)` deletes the corresponding `follows` row then calls `GetProfileByUsername` to return the full profile. Returns `*domain.ProfileNotFoundError` when the followee username does not exist.
-- `InsertArticle(ctx, authorID, slug, a)` inserts a new article and returns the full `*domain.Article` including the author profile (fetched by `author_id`). Maps PostgreSQL unique-violation errors on `articles_title_unique` or `articles_slug_unique` to `*domain.DuplicateError{Field: "title"}`. `TagList` is always `[]string{}`, `Favorited` is always `false`, `FavoritesCount` is always `0`.
+- `InsertArticle(ctx, authorID, slug, a)` wraps all operations in a transaction. Inserts the article, upserts tags (via `INSERT ... ON CONFLICT DO NOTHING`), links tags to the article via `article_tags`, then fetches the author profile. Maps PostgreSQL unique-violation errors on `articles_title_unique` or `articles_slug_unique` to `*domain.DuplicateError{Field: "title"}`. Returns `TagList` from the (deduplicated) input; `Favorited` is always `false`, `FavoritesCount` is always `0`.
+- `GetAllTags(ctx)` returns all tag names ordered alphabetically. Returns `[]string{}` (never nil) when there are no tags.
 
 **Schema (`users` table):**
 | Column | Type | Notes |
@@ -111,6 +118,18 @@ PostgreSQL persistence via `sqlx`:
 | author_id | INTEGER | FK → users.id |
 | created_at | TIMESTAMPTZ | Auto-set to now() |
 | updated_at | TIMESTAMPTZ | Auto-set to now() |
+
+**Schema (`tags` table):**
+| Column | Type | Notes |
+|--------|------|-------|
+| id | SERIAL | Primary key |
+| name | VARCHAR(255) | Required, unique |
+
+**Schema (`article_tags` table):**
+| Column | Type | Notes |
+|--------|------|-------|
+| article_id | INTEGER | FK → articles.id ON DELETE CASCADE, part of PK |
+| tag_id | INTEGER | FK → tags.id ON DELETE CASCADE, part of PK |
 
 ## Key Dependencies
 
@@ -168,5 +187,6 @@ The project implements user **registration**, **login**, **get current user**, *
 - Future protected routes can be added to the protected subrouter with a single line; optionally-authenticated routes go on the optional-auth subrouter.
 - `GET /api/profiles/{username}` returns the real `following` status for an authenticated viewer, or `false` for unauthenticated requests.
 - `POST /api/profiles/{username}/follow` and `DELETE /api/profiles/{username}/follow` are protected endpoints that create/remove rows in the `follows` table.
-- `POST /api/articles` creates an article; slug is generated from the title (kebab-case). `tagList` is not yet stored (always returns `[]`). `favorited` and `favoritesCount` are always `false`/`0`.
+- `POST /api/articles` creates an article; slug is generated from the title (kebab-case). `tagList` is stored in the `tags` and `article_tags` tables and returned in the response. `favorited` and `favoritesCount` are always `false`/`0`.
+- `GET /api/tags` returns all tags ordered alphabetically.
 - Get, list, update, delete article and other RealWorld endpoints are not yet built.

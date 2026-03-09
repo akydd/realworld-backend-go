@@ -62,4 +62,5 @@ type CreateArticle struct {
 	Title       string
 	Description string
 	Body        string
+	TagList     []string
 }
