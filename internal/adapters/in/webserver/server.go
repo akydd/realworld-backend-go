@@ -24,12 +24,14 @@ type ServerHandlers interface {
 	FollowUser(http.ResponseWriter, *http.Request)
 	UnfollowUser(http.ResponseWriter, *http.Request)
 	CreateArticle(http.ResponseWriter, *http.Request)
+	GetTags(http.ResponseWriter, *http.Request)
 }
 
 func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error) {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/users", h.RegisterUser).Methods("POST")
 	r.HandleFunc("/api/users/login", h.LoginUser).Methods("POST")
+	r.HandleFunc("/api/tags", h.GetTags).Methods("GET")
 
 	protected := r.NewRoute().Subrouter()
 	protected.Use(authMiddleware(jwtSecret))
