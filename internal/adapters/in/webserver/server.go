@@ -29,6 +29,7 @@ type ServerHandlers interface {
 	FavoriteArticle(http.ResponseWriter, *http.Request)
 	UnfavoriteArticle(http.ResponseWriter, *http.Request)
 	CreateArticleComment(http.ResponseWriter, *http.Request)
+	GetArticleComments(http.ResponseWriter, *http.Request)
 	GetTags(http.ResponseWriter, *http.Request)
 }
 
@@ -54,6 +55,7 @@ func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error)
 	optionalAuth.Use(optionalAuthMiddleware(jwtSecret))
 	optionalAuth.HandleFunc("/api/profiles/{username}", h.GetProfile).Methods("GET")
 	optionalAuth.HandleFunc("/api/articles/{slug}", h.GetArticle).Methods("GET")
+	optionalAuth.HandleFunc("/api/articles/{slug}/comments", h.GetArticleComments).Methods("GET")
 
 	// logging!
 	loggedRouter := handlers.LoggingHandler(os.Stdout, r)

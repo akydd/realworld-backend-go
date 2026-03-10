@@ -4,6 +4,7 @@ import "context"
 
 type commentRepo interface {
 	InsertComment(ctx context.Context, authorID int, articleSlug string, c *CreateComment) (*Comment, error)
+	GetCommentsByArticleSlug(ctx context.Context, articleSlug string, viewerID int) ([]*Comment, error)
 }
 
 type CommentController struct {
@@ -19,4 +20,8 @@ func (c *CommentController) CreateComment(ctx context.Context, authorID int, art
 		return nil, NewValidationError("body", blankFieldErrMsg)
 	}
 	return c.repo.InsertComment(ctx, authorID, articleSlug, comment)
+}
+
+func (c *CommentController) GetComments(ctx context.Context, articleSlug string, viewerID int) ([]*Comment, error) {
+	return c.repo.GetCommentsByArticleSlug(ctx, articleSlug, viewerID)
 }

@@ -39,6 +39,7 @@ type tagService interface {
 
 type commentService interface {
 	CreateComment(ctx context.Context, authorID int, articleSlug string, c *domain.CreateComment) (*domain.Comment, error)
+	GetComments(ctx context.Context, articleSlug string, viewerID int) ([]*domain.Comment, error)
 }
 
 type Handler struct {
@@ -628,6 +629,10 @@ type CommentResponse struct {
 	Comment CommentResponseInner `json:"comment"`
 }
 
+type CommentsResponse struct {
+	Comments []CommentResponseInner `json:"comments"`
+}
+
 func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
 	authorID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -677,6 +682,46 @@ func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	})
+}
+
+func (h *Handler) GetArticleComments(w http.ResponseWriter, r *http.Request) {
+	slug := mux.Vars(r)["slug"]
+	viewerID, _ := r.Context().Value(userIDKey).(int)
+
+	w.Header().Set("Content-Type", "application/json")
+
+	comments, err := h.commentService.GetComments(r.Context(), slug, viewerID)
+	if err != nil {
+		var notFoundErr *domain.ArticleNotFoundError
+		if errors.As(err, &notFoundErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	resp := CommentsResponse{Comments: make([]CommentResponseInner, 0, len(comments))}
+	for _, c := range comments {
+		resp.Comments = append(resp.Comments, CommentResponseInner{
+			ID:        c.ID,
+			CreatedAt: c.CreatedAt,
+			UpdatedAt: c.UpdatedAt,
+			Body:      c.Body,
+			Author: CommentAuthor{
+				Username:  c.Author.Username,
+				Bio:       c.Author.Bio,
+				Image:     c.Author.Image,
+				Following: c.Author.Following,
+			},
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func createErrResponse(k string, v []string) []byte {
