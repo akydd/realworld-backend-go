@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"net/http"
 	"realworld-backend-go/internal/domain"
+	"strconv"
 	"time"
 
 	"github.com/gorilla/mux"
@@ -40,6 +41,7 @@ type tagService interface {
 type commentService interface {
 	CreateComment(ctx context.Context, authorID int, articleSlug string, c *domain.CreateComment) (*domain.Comment, error)
 	GetComments(ctx context.Context, articleSlug string, viewerID int) ([]*domain.Comment, error)
+	DeleteComment(ctx context.Context, callerID int, articleSlug string, commentID int) error
 }
 
 type Handler struct {
@@ -682,6 +684,44 @@ func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	})
+}
+
+func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
+	callerID := r.Context().Value(userIDKey).(int)
+	slug := mux.Vars(r)["slug"]
+
+	commentID, err := strconv.Atoi(mux.Vars(r)["id"])
+	if err != nil {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusBadRequest)
+		_, _ = w.Write(createErrResponse("id", []string{"must be an integer"}))
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := h.commentService.DeleteComment(r.Context(), callerID, slug, commentID); err != nil {
+		var notFoundArticle *domain.ArticleNotFoundError
+		var notFoundComment *domain.CommentNotFoundError
+		var credErr *domain.CredentialsError
+		if errors.As(err, &notFoundArticle) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
+		} else if errors.As(err, &notFoundComment) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("comment", []string{"not found"}))
+		} else if errors.As(err, &credErr) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) GetArticleComments(w http.ResponseWriter, r *http.Request) {

@@ -59,3 +59,9 @@ type ArticleNotFoundError struct{}
 func (a *ArticleNotFoundError) Error() string {
 	return "article not found"
 }
+
+type CommentNotFoundError struct{}
+
+func (c *CommentNotFoundError) Error() string {
+	return "comment not found"
+}

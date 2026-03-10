@@ -647,6 +647,35 @@ func (p *Postgres) GetCommentsByArticleSlug(ctx context.Context, articleSlug str
 	return comments, nil
 }
 
+func (p *Postgres) DeleteComment(ctx context.Context, callerID int, articleSlug string, commentID int) error {
+	var articleID int
+	err := p.db.QueryRowxContext(ctx, `SELECT id FROM articles WHERE slug = $1`, articleSlug).Scan(&articleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.ArticleNotFoundError{}
+		}
+		return err
+	}
+
+	var authorID int
+	err = p.db.QueryRowxContext(ctx,
+		`SELECT author_id FROM comments WHERE id = $1 AND article_id = $2`,
+		commentID, articleID).Scan(&authorID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.CommentNotFoundError{}
+		}
+		return err
+	}
+
+	if authorID != callerID {
+		return &domain.CredentialsError{}
+	}
+
+	_, err = p.db.ExecContext(ctx, `DELETE FROM comments WHERE id = $1`, commentID)
+	return err
+}
+
 func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	var tags []string
 	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)
