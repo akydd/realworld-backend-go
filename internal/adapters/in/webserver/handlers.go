@@ -37,19 +37,25 @@ type tagService interface {
 	GetTags(ctx context.Context) ([]string, error)
 }
 
+type commentService interface {
+	CreateComment(ctx context.Context, authorID int, articleSlug string, c *domain.CreateComment) (*domain.Comment, error)
+}
+
 type Handler struct {
 	service        userService
 	profileService profileService
 	articleService articleService
 	tagService     tagService
+	commentService commentService
 }
 
-func NewHandler(s userService, ps profileService, as articleService, ts tagService) *Handler {
+func NewHandler(s userService, ps profileService, as articleService, ts tagService, cs commentService) *Handler {
 	return &Handler{
 		service:        s,
 		profileService: ps,
 		articleService: as,
 		tagService:     ts,
+		commentService: cs,
 	}
 }
 
@@ -601,6 +607,76 @@ func (h *Handler) UnfavoriteArticle(w http.ResponseWriter, r *http.Request) {
 
 	w.WriteHeader(http.StatusOK)
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
+}
+
+type CommentAuthor struct {
+	Username  string  `json:"username"`
+	Bio       *string `json:"bio"`
+	Image     *string `json:"image"`
+	Following bool    `json:"following"`
+}
+
+type CommentResponseInner struct {
+	ID        int           `json:"id"`
+	CreatedAt time.Time     `json:"createdAt"`
+	UpdatedAt time.Time     `json:"updatedAt"`
+	Body      string        `json:"body"`
+	Author    CommentAuthor `json:"author"`
+}
+
+type CommentResponse struct {
+	Comment CommentResponseInner `json:"comment"`
+}
+
+func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
+	authorID := r.Context().Value(userIDKey).(int)
+	slug := mux.Vars(r)["slug"]
+
+	var req struct {
+		Comment struct {
+			Body string `json:"body"`
+		} `json:"comment"`
+	}
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	comment, err := h.commentService.CreateComment(r.Context(), authorID, slug, &domain.CreateComment{Body: req.Comment.Body})
+	if err != nil {
+		var validationErr *domain.ValidationError
+		var notFoundErr *domain.ArticleNotFoundError
+		if errors.As(err, &validationErr) {
+			w.WriteHeader(http.StatusUnprocessableEntity)
+			_, _ = w.Write(createErrResponse(validationErr.Field, validationErr.Errors))
+		} else if errors.As(err, &notFoundErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusCreated)
+	_ = json.NewEncoder(w).Encode(CommentResponse{
+		Comment: CommentResponseInner{
+			ID:        comment.ID,
+			CreatedAt: comment.CreatedAt,
+			UpdatedAt: comment.UpdatedAt,
+			Body:      comment.Body,
+			Author: CommentAuthor{
+				Username:  comment.Author.Username,
+				Bio:       comment.Author.Bio,
+				Image:     comment.Author.Image,
+				Following: comment.Author.Following,
+			},
+		},
+	})
 }
 
 func createErrResponse(k string, v []string) []byte {

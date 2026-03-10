@@ -36,7 +36,8 @@ func main() {
 	profileController := domain.NewProfileController(database)
 	articleController := domain.NewArticleController(database)
 	tagController := domain.NewTagController(database)
-	handlers := webserver.NewHandler(userController, profileController, articleController, tagController)
+	commentController := domain.NewCommentController(database)
+	handlers := webserver.NewHandler(userController, profileController, articleController, tagController, commentController)
 
 	port := os.Getenv("SERVER_PORT")
 

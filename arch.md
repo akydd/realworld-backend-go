@@ -16,6 +16,7 @@ realworld-backend-go/
 │   │   ├── profile.go                # ProfileController + profileRepo interface
 │   │   ├── article.go                # ArticleController + articleRepo interface
 │   │   ├── tag.go                    # TagController + tagRepo interface
+│   │   ├── comment.go                # CommentController + commentRepo interface
 │   │   └── errors.go                 # ValidationError type
 │   └── adapters/
 │       ├── in/webserver/             # Inbound: HTTP
@@ -29,7 +30,8 @@ realworld-backend-go/
 │               ├── 003_create_follows.sql
 │               ├── 004_create_articles.sql
 │               ├── 005_create_tags.sql
-│               └── 006_create_article_favorites.sql
+│               ├── 006_create_article_favorites.sql
+│               └── 007_create_comments.sql
 ├── compose.yaml                      # Docker Compose (prod DB)
 ├── compose.test.yaml                 # Docker Compose (test DB)
 ├── Makefile                          # make int-tests runner
@@ -54,6 +56,8 @@ Pure Go with no framework dependencies. Contains:
 - **`articleRepo` interface**: Decouples article domain from persistence. Methods: `InsertArticle(ctx, authorID, slug, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`.
 - **`TagController`**: Handles tag listing. Method: `GetTags(ctx)`.
 - **`tagRepo` interface**: Decouples tag domain from persistence. Method: `GetAllTags(ctx)`.
+- **`CommentController`**: Handles comment creation. Validates body is non-blank. Method: `CreateComment(ctx, authorID, articleSlug, c)`.
+- **`commentRepo` interface**: Decouples comment domain from persistence. Method: `InsertComment(ctx, authorID, articleSlug, c)`.
 
 ### Inbound Adapter — HTTP (`internal/adapters/in/webserver/`)
 Handles the HTTP protocol layer:
@@ -77,6 +81,7 @@ Handles the HTTP protocol layer:
 | PUT | `/api/articles/{slug}` | Update an article (auth required, author only) |
 | POST | `/api/articles/{slug}/favorite` | Favorite an article (auth required) |
 | DELETE | `/api/articles/{slug}/favorite` | Unfavorite an article (auth required) |
+| POST | `/api/articles/{slug}/comments` | Create a comment on an article (auth required) |
 | GET | `/api/tags` | List all tags (no auth) |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
@@ -97,6 +102,7 @@ PostgreSQL persistence via `sqlx`:
 - `GetArticleBySlug(ctx, slug, viewerID)` fetches a single article by slug in one query: JOINs `users` for the author, LEFT JOINs `follows` for `following`, LEFT JOINs `article_tags`+`tags` with `ARRAY_AGG` for tags, LEFT JOINs `article_favorites` for viewer-specific `favorited`, and uses a correlated subquery for `favoritesCount`. All viewer-specific fields use `viewerID=0` → `false` for unauthenticated requests. Returns `*domain.ArticleNotFoundError` when no row is found.
 - `FavoriteArticle(ctx, userID, slug)` inserts into `article_favorites` (`ON CONFLICT DO NOTHING`) then calls `GetArticleBySlug`. Returns `*domain.ArticleNotFoundError` if the slug doesn't exist.
 - `UnfavoriteArticle(ctx, userID, slug)` deletes from `article_favorites` then calls `GetArticleBySlug`. Returns `*domain.ArticleNotFoundError` if the slug doesn't exist.
+- `InsertComment(ctx, authorID, articleSlug, c)` uses a single CTE query: `INSERT INTO comments ... SELECT ... FROM articles WHERE slug = $3` — if the article doesn't exist, 0 rows are inserted and `sql.ErrNoRows` from `RETURNING` maps to `*domain.ArticleNotFoundError`. Joins `users` in the same query to return the author profile.
 - `UpdateArticle(ctx, callerID, slug, u)` wraps the update in a transaction: fetches the current article (→ `ArticleNotFoundError` if missing), checks `author_id == callerID` (→ `CredentialsError` if not), merges partial fields, recomputes slug via `domain.GenerateSlug` if title changed, runs `UPDATE`, maps unique-violation errors to `DuplicateError{Field: "title"}`, commits, then calls `GetArticleBySlug` to return the full response.
 - `GetAllTags(ctx)` returns all tag names ordered alphabetically. Returns `[]string{}` (never nil) when there are no tags.
 
@@ -145,6 +151,16 @@ PostgreSQL persistence via `sqlx`:
 |--------|------|-------|
 | user_id | INTEGER | FK → users.id ON DELETE CASCADE, part of PK |
 | article_id | INTEGER | FK → articles.id ON DELETE CASCADE, part of PK |
+
+**Schema (`comments` table):**
+| Column | Type | Notes |
+|--------|------|-------|
+| id | SERIAL | Primary key |
+| body | TEXT | Required |
+| author_id | INTEGER | FK → users.id ON DELETE CASCADE |
+| article_id | INTEGER | FK → articles.id ON DELETE CASCADE |
+| created_at | TIMESTAMPTZ | Auto-set to now() |
+| updated_at | TIMESTAMPTZ | Auto-set to now() |
 
 ## Key Dependencies
 
@@ -208,4 +224,5 @@ The project implements user **registration**, **login**, **get current user**, *
 - `PUT /api/articles/{slug}` updates an article's title, description, and/or body (at least one required); title change regenerates the slug. Only the author may update; returns 401 otherwise.
 - `POST /api/articles/{slug}/favorite` and `DELETE /api/articles/{slug}/favorite` mark/unmark an article as a favorite for the caller; both are idempotent and return the updated article.
 - `favorited` and `favoritesCount` are now real computed values in all single-article responses.
-- List, delete article and other RealWorld endpoints are not yet built.
+- `POST /api/articles/{slug}/comments` creates a comment on an article; body is required; returns 201 with the comment and author profile.
+- List, delete article, get/delete comments and other RealWorld endpoints are not yet built.

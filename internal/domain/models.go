@@ -70,3 +70,15 @@ type UpdateArticle struct {
 	Description *string
 	Body        *string
 }
+
+type Comment struct {
+	ID        int
+	CreatedAt time.Time
+	UpdatedAt time.Time
+	Body      string
+	Author    Profile
+}
+
+type CreateComment struct {
+	Body string
+}

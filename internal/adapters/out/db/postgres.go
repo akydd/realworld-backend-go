@@ -540,6 +540,55 @@ func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string,
 	return p.GetArticleBySlug(ctx, newSlug, callerID)
 }
 
+func (p *Postgres) InsertComment(ctx context.Context, authorID int, articleSlug string, c *domain.CreateComment) (*domain.Comment, error) {
+	query := `
+		WITH ins AS (
+			INSERT INTO comments (body, author_id, article_id)
+			SELECT $1, $2, id FROM articles WHERE slug = $3
+			RETURNING id, body, author_id, created_at, updated_at
+		)
+		SELECT ins.id, ins.body, ins.created_at, ins.updated_at,
+		       u.username, u.bio, u.image
+		FROM ins
+		JOIN users u ON u.id = ins.author_id`
+
+	var row struct {
+		ID        int            `db:"id"`
+		Body      string         `db:"body"`
+		CreatedAt time.Time      `db:"created_at"`
+		UpdatedAt time.Time      `db:"updated_at"`
+		Username  string         `db:"username"`
+		Bio       sql.NullString `db:"bio"`
+		Image     sql.NullString `db:"image"`
+	}
+
+	err := p.db.QueryRowxContext(ctx, query, c.Body, authorID, articleSlug).StructScan(&row)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.ArticleNotFoundError{}
+		}
+		return nil, err
+	}
+
+	author := domain.Profile{Username: row.Username, Following: false}
+	if row.Bio.Valid {
+		s := row.Bio.String
+		author.Bio = &s
+	}
+	if row.Image.Valid {
+		s := row.Image.String
+		author.Image = &s
+	}
+
+	return &domain.Comment{
+		ID:        row.ID,
+		CreatedAt: row.CreatedAt,
+		UpdatedAt: row.UpdatedAt,
+		Body:      row.Body,
+		Author:    author,
+	}, nil
+}
+
 func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	var tags []string
 	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)
