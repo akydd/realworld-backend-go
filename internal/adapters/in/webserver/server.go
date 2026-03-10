@@ -30,6 +30,7 @@ type ServerHandlers interface {
 	UnfavoriteArticle(http.ResponseWriter, *http.Request)
 	CreateArticleComment(http.ResponseWriter, *http.Request)
 	GetArticleComments(http.ResponseWriter, *http.Request)
+	DeleteArticleComment(http.ResponseWriter, *http.Request)
 	GetTags(http.ResponseWriter, *http.Request)
 }
 
@@ -50,6 +51,7 @@ func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error)
 	protected.HandleFunc("/api/articles/{slug}/favorite", h.FavoriteArticle).Methods("POST")
 	protected.HandleFunc("/api/articles/{slug}/favorite", h.UnfavoriteArticle).Methods("DELETE")
 	protected.HandleFunc("/api/articles/{slug}/comments", h.CreateArticleComment).Methods("POST")
+	protected.HandleFunc("/api/articles/{slug}/comments/{id}", h.DeleteArticleComment).Methods("DELETE")
 
 	optionalAuth := r.NewRoute().Subrouter()
 	optionalAuth.Use(optionalAuthMiddleware(jwtSecret))

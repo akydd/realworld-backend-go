@@ -52,12 +52,13 @@ Pure Go with no framework dependencies. Contains:
 - **`CredentialsError`**: Error type returned when login credentials are invalid (wrong password or unknown email).
 - **`ProfileNotFoundError`**: Error type returned when a profile lookup finds no matching user.
 - **`ArticleNotFoundError`**: Error type returned when an article lookup finds no matching article.
+- **`CommentNotFoundError`**: Error type returned when a comment lookup finds no matching comment (or the comment doesn't belong to the specified article).
 - **`ArticleController`**: Handles article creation, retrieval, updates, and favorites. Validates input, deduplicates tags (first-occurrence wins), generates slug from title via exported `GenerateSlug(title)` (kebab-case regex). Methods: `CreateArticle(ctx, authorID, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`.
 - **`articleRepo` interface**: Decouples article domain from persistence. Methods: `InsertArticle(ctx, authorID, slug, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`.
 - **`TagController`**: Handles tag listing. Method: `GetTags(ctx)`.
 - **`tagRepo` interface**: Decouples tag domain from persistence. Method: `GetAllTags(ctx)`.
-- **`CommentController`**: Handles comment creation and retrieval. Validates body is non-blank. Methods: `CreateComment(ctx, authorID, articleSlug, c)`, `GetComments(ctx, articleSlug, viewerID)`.
-- **`commentRepo` interface**: Decouples comment domain from persistence. Methods: `InsertComment(ctx, authorID, articleSlug, c)`, `GetCommentsByArticleSlug(ctx, articleSlug, viewerID)`.
+- **`CommentController`**: Handles comment creation, retrieval, and deletion. Validates body is non-blank on creation. Methods: `CreateComment(ctx, authorID, articleSlug, c)`, `GetComments(ctx, articleSlug, viewerID)`, `DeleteComment(ctx, callerID, articleSlug, commentID)`.
+- **`commentRepo` interface**: Decouples comment domain from persistence. Methods: `InsertComment(ctx, authorID, articleSlug, c)`, `GetCommentsByArticleSlug(ctx, articleSlug, viewerID)`, `DeleteComment(ctx, callerID, articleSlug, commentID)`.
 
 ### Inbound Adapter — HTTP (`internal/adapters/in/webserver/`)
 Handles the HTTP protocol layer:
@@ -83,6 +84,7 @@ Handles the HTTP protocol layer:
 | DELETE | `/api/articles/{slug}/favorite` | Unfavorite an article (auth required) |
 | POST | `/api/articles/{slug}/comments` | Create a comment on an article (auth required) |
 | GET | `/api/articles/{slug}/comments` | Get comments for an article (auth optional) |
+| DELETE | `/api/articles/{slug}/comments/{id}` | Delete a comment (auth required, author only) |
 | GET | `/api/tags` | List all tags (no auth) |
 
 **Response codes:** `200 OK`, `201 Created`, `401 Unauthorized`, `404 Not Found`, `409 Conflict`, `422 Unprocessable Entity`, `500 Internal Server Error`
@@ -105,6 +107,7 @@ PostgreSQL persistence via `sqlx`:
 - `UnfavoriteArticle(ctx, userID, slug)` deletes from `article_favorites` then calls `GetArticleBySlug`. Returns `*domain.ArticleNotFoundError` if the slug doesn't exist.
 - `InsertComment(ctx, authorID, articleSlug, c)` uses a single CTE query: `INSERT INTO comments ... SELECT ... FROM articles WHERE slug = $3` — if the article doesn't exist, 0 rows are inserted and `sql.ErrNoRows` from `RETURNING` maps to `*domain.ArticleNotFoundError`. Joins `users` in the same query to return the author profile.
 - `GetCommentsByArticleSlug(ctx, articleSlug, viewerID)` first checks article existence (→ `ArticleNotFoundError` if missing), then queries all comments with a JOIN on `users` and LEFT JOIN on `follows` for viewer-specific `following`. Returns `[]*domain.Comment` ordered by `created_at ASC`; returns an empty slice (never nil) when the article exists but has no comments.
+- `DeleteComment(ctx, callerID, articleSlug, commentID)` checks article existence (→ `ArticleNotFoundError`), checks comment existence with matching `article_id` (→ `CommentNotFoundError`), checks `author_id == callerID` (→ `CredentialsError`), then deletes the comment.
 - `UpdateArticle(ctx, callerID, slug, u)` wraps the update in a transaction: fetches the current article (→ `ArticleNotFoundError` if missing), checks `author_id == callerID` (→ `CredentialsError` if not), merges partial fields, recomputes slug via `domain.GenerateSlug` if title changed, runs `UPDATE`, maps unique-violation errors to `DuplicateError{Field: "title"}`, commits, then calls `GetArticleBySlug` to return the full response.
 - `GetAllTags(ctx)` returns all tag names ordered alphabetically. Returns `[]string{}` (never nil) when there are no tags.
 
@@ -228,4 +231,5 @@ The project implements user **registration**, **login**, **get current user**, *
 - `favorited` and `favoritesCount` are now real computed values in all single-article responses.
 - `POST /api/articles/{slug}/comments` creates a comment on an article; body is required; returns 201 with the comment and author profile.
 - `GET /api/articles/{slug}/comments` returns all comments for an article (auth optional); `author.following` reflects the viewer's follow state. Returns 404 if the article is not found, empty array if it exists but has no comments.
-- List, delete article, delete comments and other RealWorld endpoints are not yet built.
+- `DELETE /api/articles/{slug}/comments/{id}` deletes a comment; returns 404 if the article or comment is not found (or comment doesn't belong to the article), 401 if the caller is not the author, 204 on success.
+- List, delete article, and other RealWorld endpoints are not yet built.
