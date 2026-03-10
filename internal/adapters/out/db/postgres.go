@@ -589,6 +589,64 @@ func (p *Postgres) InsertComment(ctx context.Context, authorID int, articleSlug 
 	}, nil
 }
 
+func (p *Postgres) GetCommentsByArticleSlug(ctx context.Context, articleSlug string, viewerID int) ([]*domain.Comment, error) {
+	var articleID int
+	err := p.db.QueryRowxContext(ctx, `SELECT id FROM articles WHERE slug = $1`, articleSlug).Scan(&articleID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return nil, &domain.ArticleNotFoundError{}
+		}
+		return nil, err
+	}
+
+	query := `
+		SELECT
+			c.id, c.body, c.created_at, c.updated_at,
+			u.username, u.bio, u.image,
+			CASE WHEN f.follower_id IS NOT NULL THEN true ELSE false END AS following
+		FROM comments c
+		JOIN users u ON u.id = c.author_id
+		LEFT JOIN follows f ON f.followee_id = c.author_id AND f.follower_id = $2
+		WHERE c.article_id = $1
+		ORDER BY c.created_at ASC`
+
+	var rows []struct {
+		ID        int            `db:"id"`
+		Body      string         `db:"body"`
+		CreatedAt time.Time      `db:"created_at"`
+		UpdatedAt time.Time      `db:"updated_at"`
+		Username  string         `db:"username"`
+		Bio       sql.NullString `db:"bio"`
+		Image     sql.NullString `db:"image"`
+		Following bool           `db:"following"`
+	}
+
+	if err := p.db.SelectContext(ctx, &rows, query, articleID, viewerID); err != nil {
+		return nil, err
+	}
+
+	comments := make([]*domain.Comment, 0, len(rows))
+	for _, row := range rows {
+		author := domain.Profile{Username: row.Username, Following: row.Following}
+		if row.Bio.Valid {
+			s := row.Bio.String
+			author.Bio = &s
+		}
+		if row.Image.Valid {
+			s := row.Image.String
+			author.Image = &s
+		}
+		comments = append(comments, &domain.Comment{
+			ID:        row.ID,
+			CreatedAt: row.CreatedAt,
+			UpdatedAt: row.UpdatedAt,
+			Body:      row.Body,
+			Author:    author,
+		})
+	}
+	return comments, nil
+}
+
 func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	var tags []string
 	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)
