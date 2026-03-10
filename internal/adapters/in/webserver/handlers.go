@@ -32,6 +32,7 @@ type articleService interface {
 	UpdateArticle(ctx context.Context, callerID int, slug string, u *domain.UpdateArticle) (*domain.Article, error)
 	FavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
 	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
+	DeleteArticle(ctx context.Context, callerID int, slug string) error
 }
 
 type tagService interface {
@@ -684,6 +685,32 @@ func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
 			},
 		},
 	})
+}
+
+func (h *Handler) DeleteArticle(w http.ResponseWriter, r *http.Request) {
+	callerID := r.Context().Value(userIDKey).(int)
+	slug := mux.Vars(r)["slug"]
+
+	w.Header().Set("Content-Type", "application/json")
+
+	if err := h.articleService.DeleteArticle(r.Context(), callerID, slug); err != nil {
+		var notFoundErr *domain.ArticleNotFoundError
+		var credErr *domain.CredentialsError
+		if errors.As(err, &notFoundErr) {
+			w.WriteHeader(http.StatusNotFound)
+			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
+		} else if errors.As(err, &credErr) {
+			w.WriteHeader(http.StatusUnauthorized)
+			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else {
+			fmt.Println(err.Error())
+			w.WriteHeader(http.StatusInternalServerError)
+			_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		}
+		return
+	}
+
+	w.WriteHeader(http.StatusNoContent)
 }
 
 func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
