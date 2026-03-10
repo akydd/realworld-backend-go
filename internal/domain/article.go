@@ -55,6 +55,7 @@ type articleRepo interface {
 	UpdateArticle(ctx context.Context, callerID int, slug string, u *UpdateArticle) (*Article, error)
 	FavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
 	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
+	DeleteArticle(ctx context.Context, callerID int, slug string) error
 }
 
 type ArticleController struct {
@@ -94,4 +95,8 @@ func (c *ArticleController) FavoriteArticle(ctx context.Context, userID int, slu
 
 func (c *ArticleController) UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error) {
 	return c.repo.UnfavoriteArticle(ctx, userID, slug)
+}
+
+func (c *ArticleController) DeleteArticle(ctx context.Context, callerID int, slug string) error {
+	return c.repo.DeleteArticle(ctx, callerID, slug)
 }

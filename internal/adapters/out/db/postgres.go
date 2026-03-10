@@ -647,6 +647,24 @@ func (p *Postgres) GetCommentsByArticleSlug(ctx context.Context, articleSlug str
 	return comments, nil
 }
 
+func (p *Postgres) DeleteArticle(ctx context.Context, callerID int, slug string) error {
+	var authorID int
+	err := p.db.QueryRowxContext(ctx, `SELECT author_id FROM articles WHERE slug = $1`, slug).Scan(&authorID)
+	if err != nil {
+		if errors.Is(err, sql.ErrNoRows) {
+			return &domain.ArticleNotFoundError{}
+		}
+		return err
+	}
+
+	if authorID != callerID {
+		return &domain.CredentialsError{}
+	}
+
+	_, err = p.db.ExecContext(ctx, `DELETE FROM articles WHERE slug = $1`, slug)
+	return err
+}
+
 func (p *Postgres) DeleteComment(ctx context.Context, callerID int, articleSlug string, commentID int) error {
 	var articleID int
 	err := p.db.QueryRowxContext(ctx, `SELECT id FROM articles WHERE slug = $1`, articleSlug).Scan(&articleID)
