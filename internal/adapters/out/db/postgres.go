@@ -290,15 +290,20 @@ func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string,
 		RETURNING id, slug, title, description, body, author_id, created_at, updated_at`
 	var row articleRow
 
+	baseSlug := slug
+	for i := 2; ; i++ {
+		var exists bool
+		if err = tx.QueryRowxContext(ctx, `SELECT EXISTS(SELECT 1 FROM articles WHERE slug = $1)`, slug).Scan(&exists); err != nil {
+			return nil, err
+		}
+		if !exists {
+			break
+		}
+		slug = fmt.Sprintf("%s-%d", baseSlug, i)
+	}
+
 	err = tx.QueryRowxContext(ctx, query, slug, a.Title, a.Description, a.Body, authorID).StructScan(&row)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
-			switch pqErr.Constraint {
-			case "articles_title_unique", "articles_slug_unique":
-				return nil, domain.NewDuplicateError("title")
-			}
-		}
 		return nil, err
 	}
 
@@ -501,7 +506,7 @@ func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string,
 	}
 
 	if cur.AuthorID != callerID {
-		return nil, &domain.CredentialsError{}
+		return nil, &domain.ForbiddenError{}
 	}
 
 	newTitle := cur.Title
@@ -511,7 +516,19 @@ func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string,
 
 	if u.Title != nil {
 		newTitle = *u.Title
-		newSlug = domain.GenerateSlug(newTitle)
+		baseSlug := domain.GenerateSlug(newTitle)
+		newSlug = baseSlug
+		for i := 2; ; i++ {
+			var exists bool
+			if err = tx.QueryRowxContext(ctx,
+				`SELECT EXISTS(SELECT 1 FROM articles WHERE slug = $1 AND id != $2)`, newSlug, cur.ID).Scan(&exists); err != nil {
+				return nil, err
+			}
+			if !exists {
+				break
+			}
+			newSlug = fmt.Sprintf("%s-%d", baseSlug, i)
+		}
 	}
 	if u.Description != nil {
 		newDescription = *u.Description
@@ -524,13 +541,6 @@ func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string,
 		`UPDATE articles SET slug=$1, title=$2, description=$3, body=$4, updated_at=now() WHERE id=$5`,
 		newSlug, newTitle, newDescription, newBody, cur.ID)
 	if err != nil {
-		var pqErr *pq.Error
-		if errors.As(err, &pqErr) && pqErr.Code == "23505" {
-			switch pqErr.Constraint {
-			case "articles_title_unique", "articles_slug_unique":
-				return nil, domain.NewDuplicateError("title")
-			}
-		}
 		return nil, err
 	}
 
@@ -675,8 +685,23 @@ func (p *Postgres) GetCommentsByArticleSlug(ctx context.Context, articleSlug str
 	return comments, nil
 }
 
-func (p *Postgres) ListArticles(ctx context.Context, filter domain.ListArticlesFilter, viewerID int) (*domain.ArticleList, error) {
-	args := []any{viewerID}
+type listRow struct {
+	Slug           string         `db:"slug"`
+	Title          string         `db:"title"`
+	Description    string         `db:"description"`
+	CreatedAt      time.Time      `db:"created_at"`
+	UpdatedAt      time.Time      `db:"updated_at"`
+	AuthorUsername string         `db:"author_username"`
+	AuthorBio      sql.NullString `db:"author_bio"`
+	AuthorImage    sql.NullString `db:"author_image"`
+	Following      bool           `db:"following"`
+	TagList        pq.StringArray `db:"tag_list"`
+	Favorited      bool           `db:"favorited"`
+	FavoritesCount int            `db:"favorites_count"`
+	TotalCount     int            `db:"total_count"`
+}
+
+func buildArticleListQuery(conditions []string, args []any, limit, offset int) (string, []any) {
 	nextArg := func(v any) string {
 		args = append(args, v)
 		return fmt.Sprintf("$%d", len(args))
@@ -704,55 +729,21 @@ func (p *Postgres) ListArticles(ctx context.Context, filter domain.ListArticlesF
 		LEFT JOIN tags t ON t.id = at.tag_id
 		LEFT JOIN article_favorites fav ON fav.article_id = a.id AND fav.user_id = $1`
 
-	var conditions []string
-
-	if filter.Tag != nil {
-		p := nextArg(*filter.Tag)
-		conditions = append(conditions, fmt.Sprintf(
-			`EXISTS (SELECT 1 FROM article_tags at2 JOIN tags t2 ON t2.id = at2.tag_id WHERE at2.article_id = a.id AND lower(t2.name) = lower(%s))`, p))
-	}
-	if filter.Author != nil {
-		p := nextArg(*filter.Author)
-		conditions = append(conditions, fmt.Sprintf(`lower(u.username) = lower(%s)`, p))
-	}
-	if filter.Favorited != nil {
-		p := nextArg(*filter.Favorited)
-		conditions = append(conditions, fmt.Sprintf(
-			`EXISTS (SELECT 1 FROM article_favorites af2 JOIN users u2 ON u2.id = af2.user_id WHERE af2.article_id = a.id AND lower(u2.username) = lower(%s))`, p))
-	}
-
 	if len(conditions) > 0 {
 		query += " WHERE " + strings.Join(conditions, " AND ")
 	}
 
-	limitArg := nextArg(filter.Limit)
-	offsetArg := nextArg(filter.Offset)
+	limitArg := nextArg(limit)
+	offsetArg := nextArg(offset)
 	query += fmt.Sprintf(`
 		GROUP BY a.id, u.username, u.bio, u.image, f.follower_id, fav.user_id
 		ORDER BY a.created_at DESC
 		LIMIT %s OFFSET %s`, limitArg, offsetArg)
 
-	type listRow struct {
-		Slug           string         `db:"slug"`
-		Title          string         `db:"title"`
-		Description    string         `db:"description"`
-		CreatedAt      time.Time      `db:"created_at"`
-		UpdatedAt      time.Time      `db:"updated_at"`
-		AuthorUsername string         `db:"author_username"`
-		AuthorBio      sql.NullString `db:"author_bio"`
-		AuthorImage    sql.NullString `db:"author_image"`
-		Following      bool           `db:"following"`
-		TagList        pq.StringArray `db:"tag_list"`
-		Favorited      bool           `db:"favorited"`
-		FavoritesCount int            `db:"favorites_count"`
-		TotalCount     int            `db:"total_count"`
-	}
+	return query, args
+}
 
-	var rows []listRow
-	if err := p.db.SelectContext(ctx, &rows, query, args...); err != nil {
-		return nil, err
-	}
-
+func convertListRows(rows []listRow) *domain.ArticleList {
 	result := &domain.ArticleList{
 		Articles:   make([]*domain.Article, 0, len(rows)),
 		TotalCount: 0,
@@ -784,7 +775,54 @@ func (p *Postgres) ListArticles(ctx context.Context, filter domain.ListArticlesF
 			Author:         author,
 		})
 	}
-	return result, nil
+	return result
+}
+
+func (p *Postgres) ListArticles(ctx context.Context, filter domain.ListArticlesFilter, viewerID int) (*domain.ArticleList, error) {
+	args := []any{viewerID}
+	nextArg := func(v any) string {
+		args = append(args, v)
+		return fmt.Sprintf("$%d", len(args))
+	}
+
+	var conditions []string
+
+	if filter.Tag != nil {
+		p := nextArg(*filter.Tag)
+		conditions = append(conditions, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM article_tags at2 JOIN tags t2 ON t2.id = at2.tag_id WHERE at2.article_id = a.id AND lower(t2.name) = lower(%s))`, p))
+	}
+	if filter.Author != nil {
+		p := nextArg(*filter.Author)
+		conditions = append(conditions, fmt.Sprintf(`lower(u.username) = lower(%s)`, p))
+	}
+	if filter.Favorited != nil {
+		p := nextArg(*filter.Favorited)
+		conditions = append(conditions, fmt.Sprintf(
+			`EXISTS (SELECT 1 FROM article_favorites af2 JOIN users u2 ON u2.id = af2.user_id WHERE af2.article_id = a.id AND lower(u2.username) = lower(%s))`, p))
+	}
+
+	query, args := buildArticleListQuery(conditions, args, filter.Limit, filter.Offset)
+
+	var rows []listRow
+	if err := p.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, err
+	}
+
+	return convertListRows(rows), nil
+}
+
+func (p *Postgres) FeedArticles(ctx context.Context, filter domain.ArticleFeedFilter, viewerID int) (*domain.ArticleList, error) {
+	args := []any{viewerID}
+	conditions := []string{"f.follower_id IS NOT NULL"}
+	query, args := buildArticleListQuery(conditions, args, filter.Limit, filter.Offset)
+
+	var rows []listRow
+	if err := p.db.SelectContext(ctx, &rows, query, args...); err != nil {
+		return nil, err
+	}
+
+	return convertListRows(rows), nil
 }
 
 func (p *Postgres) DeleteArticle(ctx context.Context, callerID int, slug string) error {
@@ -798,7 +836,7 @@ func (p *Postgres) DeleteArticle(ctx context.Context, callerID int, slug string)
 	}
 
 	if authorID != callerID {
-		return &domain.CredentialsError{}
+		return &domain.ForbiddenError{}
 	}
 
 	_, err = p.db.ExecContext(ctx, `DELETE FROM articles WHERE slug = $1`, slug)
@@ -827,7 +865,7 @@ func (p *Postgres) DeleteComment(ctx context.Context, callerID int, articleSlug 
 	}
 
 	if authorID != callerID {
-		return &domain.CredentialsError{}
+		return &domain.ForbiddenError{}
 	}
 
 	_, err = p.db.ExecContext(ctx, `DELETE FROM comments WHERE id = $1`, commentID)

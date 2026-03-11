@@ -57,6 +57,7 @@ type articleRepo interface {
 	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
 	DeleteArticle(ctx context.Context, callerID int, slug string) error
 	ListArticles(ctx context.Context, filter ListArticlesFilter, viewerID int) (*ArticleList, error)
+	FeedArticles(ctx context.Context, filter ArticleFeedFilter, viewerID int) (*ArticleList, error)
 }
 
 type ArticleController struct {
@@ -104,4 +105,8 @@ func (c *ArticleController) DeleteArticle(ctx context.Context, callerID int, slu
 
 func (c *ArticleController) ListArticles(ctx context.Context, filter ListArticlesFilter, viewerID int) (*ArticleList, error) {
 	return c.repo.ListArticles(ctx, filter, viewerID)
+}
+
+func (c *ArticleController) FeedArticles(ctx context.Context, filter ArticleFeedFilter, viewerID int) (*ArticleList, error) {
+	return c.repo.FeedArticles(ctx, filter, viewerID)
 }

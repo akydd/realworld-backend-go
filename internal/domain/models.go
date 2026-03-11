@@ -96,3 +96,8 @@ type ListArticlesFilter struct {
 	Limit     int
 	Offset    int
 }
+
+type ArticleFeedFilter struct {
+	Limit  int
+	Offset int
+}
