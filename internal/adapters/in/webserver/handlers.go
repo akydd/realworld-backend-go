@@ -34,6 +34,7 @@ type articleService interface {
 	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
 	DeleteArticle(ctx context.Context, callerID int, slug string) error
 	ListArticles(ctx context.Context, filter domain.ListArticlesFilter, viewerID int) (*domain.ArticleList, error)
+	FeedArticles(ctx context.Context, filter domain.ArticleFeedFilter, viewerID int) (*domain.ArticleList, error)
 }
 
 type tagService interface {
@@ -604,20 +605,16 @@ func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 	if err != nil {
 		var validationErr *domain.ValidationError
 		var notFoundErr *domain.ArticleNotFoundError
-		var dupErr *domain.DuplicateError
-		var credErr *domain.CredentialsError
+		var forbiddenErr *domain.ForbiddenError
 		if errors.As(err, &validationErr) {
 			w.WriteHeader(http.StatusUnprocessableEntity)
 			_, _ = w.Write(createErrResponse(validationErr.Field, validationErr.Errors))
 		} else if errors.As(err, &notFoundErr) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
-		} else if errors.As(err, &dupErr) {
-			w.WriteHeader(http.StatusConflict)
-			_, _ = w.Write(createErrResponse(dupErr.Field, []string{dupErr.Msg}))
-		} else if errors.As(err, &credErr) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else if errors.As(err, &forbiddenErr) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(createErrResponse("article", []string{"forbidden"}))
 		} else {
 			fmt.Println(err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -744,13 +741,13 @@ func (h *Handler) DeleteArticle(w http.ResponseWriter, r *http.Request) {
 
 	if err := h.articleService.DeleteArticle(r.Context(), callerID, slug); err != nil {
 		var notFoundErr *domain.ArticleNotFoundError
-		var credErr *domain.CredentialsError
+		var forbiddenErr *domain.ForbiddenError
 		if errors.As(err, &notFoundErr) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
-		} else if errors.As(err, &credErr) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else if errors.As(err, &forbiddenErr) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(createErrResponse("article", []string{"forbidden"}))
 		} else {
 			fmt.Println(err.Error())
 			w.WriteHeader(http.StatusInternalServerError)
@@ -824,6 +821,59 @@ func (h *Handler) ListArticles(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+func (h *Handler) GetArticleFeed(w http.ResponseWriter, r *http.Request) {
+	userID := r.Context().Value(userIDKey).(int)
+
+	q := r.URL.Query()
+
+	filter := domain.ArticleFeedFilter{
+		Limit:  20,
+		Offset: 0,
+	}
+	if v, err := strconv.Atoi(q.Get("limit")); err == nil {
+		filter.Limit = v
+	}
+	if v, err := strconv.Atoi(q.Get("offset")); err == nil {
+		filter.Offset = v
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	list, err := h.articleService.FeedArticles(r.Context(), filter, userID)
+	if err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		return
+	}
+
+	resp := ArticlesResponse{
+		Articles:      make([]ArticleListItemInner, 0, len(list.Articles)),
+		ArticlesCount: list.TotalCount,
+	}
+	for _, a := range list.Articles {
+		resp.Articles = append(resp.Articles, ArticleListItemInner{
+			Slug:           a.Slug,
+			Title:          a.Title,
+			Description:    a.Description,
+			TagList:        a.TagList,
+			CreatedAt:      a.CreatedAt,
+			UpdatedAt:      a.UpdatedAt,
+			Favorited:      a.Favorited,
+			FavoritesCount: a.FavoritesCount,
+			Author: ArticleAuthor{
+				Username:  a.Author.Username,
+				Bio:       a.Author.Bio,
+				Image:     a.Author.Image,
+				Following: a.Author.Following,
+			},
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
+}
+
 func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
 	callerID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -841,16 +891,16 @@ func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
 	if err := h.commentService.DeleteComment(r.Context(), callerID, slug, commentID); err != nil {
 		var notFoundArticle *domain.ArticleNotFoundError
 		var notFoundComment *domain.CommentNotFoundError
-		var credErr *domain.CredentialsError
+		var forbiddenErr *domain.ForbiddenError
 		if errors.As(err, &notFoundArticle) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write(createErrResponse("article", []string{"not found"}))
 		} else if errors.As(err, &notFoundComment) {
 			w.WriteHeader(http.StatusNotFound)
 			_, _ = w.Write(createErrResponse("comment", []string{"not found"}))
-		} else if errors.As(err, &credErr) {
-			w.WriteHeader(http.StatusUnauthorized)
-			_, _ = w.Write(createErrResponse("credentials", []string{"invalid"}))
+		} else if errors.As(err, &forbiddenErr) {
+			w.WriteHeader(http.StatusForbidden)
+			_, _ = w.Write(createErrResponse("comment", []string{"forbidden"}))
 		} else {
 			fmt.Println(err.Error())
 			w.WriteHeader(http.StatusInternalServerError)

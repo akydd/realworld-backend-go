@@ -65,3 +65,9 @@ type CommentNotFoundError struct{}
 func (c *CommentNotFoundError) Error() string {
 	return "comment not found"
 }
+
+type ForbiddenError struct{}
+
+func (f *ForbiddenError) Error() string {
+	return "forbidden"
+}
