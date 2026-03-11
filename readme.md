@@ -1,3 +1,65 @@
-# Realworld backend
+# RealWorld Backend — Go
 
-Written in Go using Claude code.
+A [RealWorld](https://github.com/gothinkster/realworld) spec-compliant backend API for a social blogging platform (think Medium.com). Users can register, publish articles, follow each other, comment, and favorite posts.
+
+## Architecture
+
+The project uses **Hexagonal Architecture** (Ports & Adapters):
+
+- **Domain layer** (`internal/domain/`) — pure Go business logic with no framework dependencies. Each resource (user, profile, article, comment, tag) has its own controller and repository interface.
+- **Inbound adapter** (`internal/adapters/in/webserver/`) — Gorilla Mux HTTP server. Handlers decode requests, call domain services, and encode responses. Authentication is handled by JWT middleware.
+- **Outbound adapter** (`internal/adapters/out/db/`) — PostgreSQL persistence via `sqlx`. Goose migrations run automatically on startup.
+
+See [arch.md](arch.md) for a full description of every layer, route, schema, and design decision.
+
+## How it was developed
+
+Features were written as plain-English specification files (e.g. `features/9-create-article.md`). Each feature was handed to **Claude Code**, which:
+
+1. Read the feature file and the current architecture document.
+2. Wrote an implementation plan to `features/plans/`.
+3. Implemented the plan across all required layers.
+4. Iterated until `make lint` reported no issues and `make int-tests` passed all integration tests.
+5. Updated `arch.md` to reflect the changes.
+
+The integration test suite is the [official RealWorld Hurl test suite](https://github.com/gothinkster/realworld), run against a live server and test database on every feature.
+
+## Running the app
+
+**Prerequisites:** Docker, Go 1.21+
+
+```bash
+make start
+```
+
+This will:
+1. Start the production PostgreSQL database via Docker Compose
+2. Wait until the database is ready
+3. Build the server binary
+4. Start the server on port **8090**
+
+Stop the server with Ctrl+C. To also stop the database:
+
+```bash
+docker compose down
+```
+
+## Running the integration tests
+
+**Prerequisites:** Docker, Go 1.21+, [Hurl](https://hurl.dev), and the [realworld](https://github.com/gothinkster/realworld) repo checked out as a sibling directory (`../realworld`).
+
+```bash
+make int-tests
+```
+
+This will:
+1. Start a dedicated test database on port 8096
+2. Build and start the server against the test environment (port 8097)
+3. Run the full RealWorld Hurl API test suite
+4. Tear down the server and test database
+
+## Running the linter
+
+```bash
+make lint
+```
