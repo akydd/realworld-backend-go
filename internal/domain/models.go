@@ -69,6 +69,12 @@ type UpdateArticle struct {
 	Title       *string
 	Description *string
 	Body        *string
+	TagList     *[]string // nil = not provided (preserve); non-nil = new list (may be empty)
+}
+
+type ArticleList struct {
+	Articles   []*Article
+	TotalCount int
 }
 
 type Comment struct {
@@ -81,4 +87,12 @@ type Comment struct {
 
 type CreateComment struct {
 	Body string
+}
+
+type ListArticlesFilter struct {
+	Tag       *string
+	Author    *string
+	Favorited *string
+	Limit     int
+	Offset    int
 }

@@ -40,7 +40,7 @@ func deduplicateTags(tags []string) []string {
 }
 
 func validateUpdateArticle(u *UpdateArticle) error {
-	if u.Title == nil && u.Description == nil && u.Body == nil {
+	if u.Title == nil && u.Description == nil && u.Body == nil && u.TagList == nil {
 		return NewValidationError("article", blankFieldErrMsg)
 	}
 	if u.Title != nil && *u.Title == "" {
@@ -56,6 +56,7 @@ type articleRepo interface {
 	FavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
 	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error)
 	DeleteArticle(ctx context.Context, callerID int, slug string) error
+	ListArticles(ctx context.Context, filter ListArticlesFilter, viewerID int) (*ArticleList, error)
 }
 
 type ArticleController struct {
@@ -99,4 +100,8 @@ func (c *ArticleController) UnfavoriteArticle(ctx context.Context, userID int, s
 
 func (c *ArticleController) DeleteArticle(ctx context.Context, callerID int, slug string) error {
 	return c.repo.DeleteArticle(ctx, callerID, slug)
+}
+
+func (c *ArticleController) ListArticles(ctx context.Context, filter ListArticlesFilter, viewerID int) (*ArticleList, error) {
+	return c.repo.ListArticles(ctx, filter, viewerID)
 }

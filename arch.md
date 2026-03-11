@@ -53,8 +53,11 @@ Pure Go with no framework dependencies. Contains:
 - **`ProfileNotFoundError`**: Error type returned when a profile lookup finds no matching user.
 - **`ArticleNotFoundError`**: Error type returned when an article lookup finds no matching article.
 - **`CommentNotFoundError`**: Error type returned when a comment lookup finds no matching comment (or the comment doesn't belong to the specified article).
-- **`ArticleController`**: Handles article creation, retrieval, updates, favorites, and deletion. Validates input, deduplicates tags (first-occurrence wins), generates slug from title via exported `GenerateSlug(title)` (kebab-case regex). Methods: `CreateArticle(ctx, authorID, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`, `DeleteArticle(ctx, callerID, slug)`.
-- **`articleRepo` interface**: Decouples article domain from persistence. Methods: `InsertArticle(ctx, authorID, slug, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`, `DeleteArticle(ctx, callerID, slug)`.
+- **`ArticleController`**: Handles article creation, retrieval, listing, updates, favorites, and deletion. Validates input, deduplicates tags (first-occurrence wins), generates slug from title via exported `GenerateSlug(title)` (kebab-case regex). Methods: `CreateArticle(ctx, authorID, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `ListArticles(ctx, filter, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`, `DeleteArticle(ctx, callerID, slug)`.
+- **`articleRepo` interface**: Decouples article domain from persistence. Methods: `InsertArticle(ctx, authorID, slug, a)`, `GetArticleBySlug(ctx, slug, viewerID)`, `ListArticles(ctx, filter, viewerID)`, `UpdateArticle(ctx, callerID, slug, u)`, `FavoriteArticle(ctx, userID, slug)`, `UnfavoriteArticle(ctx, userID, slug)`, `DeleteArticle(ctx, callerID, slug)`.
+- **`ListArticlesFilter`**: Input model for article listing. Fields: `Tag`, `Author`, `Favorited` (`*string`, all optional/case-insensitive), `Limit` (default 20), `Offset` (default 0).
+- **`ArticleList`**: Return type for article listing. Fields: `Articles []*Article`, `TotalCount int` (total matching count before limit/offset).
+- **`UpdateArticle`**: Extended with `TagList *[]string` — `nil` means preserve existing tags; non-nil (including empty slice) replaces them.
 - **`TagController`**: Handles tag listing. Method: `GetTags(ctx)`.
 - **`tagRepo` interface**: Decouples tag domain from persistence. Method: `GetAllTags(ctx)`.
 - **`CommentController`**: Handles comment creation, retrieval, and deletion. Validates body is non-blank on creation. Methods: `CreateComment(ctx, authorID, articleSlug, c)`, `GetComments(ctx, articleSlug, viewerID)`, `DeleteComment(ctx, callerID, articleSlug, commentID)`.
@@ -78,6 +81,7 @@ Handles the HTTP protocol layer:
 | POST | `/api/profiles/{username}/follow` | Follow a user (auth required) |
 | DELETE | `/api/profiles/{username}/follow` | Unfollow a user (auth required) |
 | POST | `/api/articles` | Create an article (auth required) |
+| GET | `/api/articles` | List articles with optional filters (auth optional) |
 | GET | `/api/articles/{slug}` | Get an article by slug (auth optional) |
 | PUT | `/api/articles/{slug}` | Update an article (auth required, author only) |
 | DELETE | `/api/articles/{slug}` | Delete an article (auth required, author only) |
@@ -109,7 +113,8 @@ PostgreSQL persistence via `sqlx`:
 - `InsertComment(ctx, authorID, articleSlug, c)` uses a single CTE query: `INSERT INTO comments ... SELECT ... FROM articles WHERE slug = $3` — if the article doesn't exist, 0 rows are inserted and `sql.ErrNoRows` from `RETURNING` maps to `*domain.ArticleNotFoundError`. Joins `users` in the same query to return the author profile.
 - `GetCommentsByArticleSlug(ctx, articleSlug, viewerID)` first checks article existence (→ `ArticleNotFoundError` if missing), then queries all comments with a JOIN on `users` and LEFT JOIN on `follows` for viewer-specific `following`. Returns `[]*domain.Comment` ordered by `created_at ASC`; returns an empty slice (never nil) when the article exists but has no comments.
 - `DeleteComment(ctx, callerID, articleSlug, commentID)` checks article existence (→ `ArticleNotFoundError`), checks comment existence with matching `article_id` (→ `CommentNotFoundError`), checks `author_id == callerID` (→ `CredentialsError`), then deletes the comment.
-- `UpdateArticle(ctx, callerID, slug, u)` wraps the update in a transaction: fetches the current article (→ `ArticleNotFoundError` if missing), checks `author_id == callerID` (→ `CredentialsError` if not), merges partial fields, recomputes slug via `domain.GenerateSlug` if title changed, runs `UPDATE`, maps unique-violation errors to `DuplicateError{Field: "title"}`, commits, then calls `GetArticleBySlug` to return the full response.
+- `UpdateArticle(ctx, callerID, slug, u)` wraps the update in a transaction: fetches the current article (→ `ArticleNotFoundError` if missing), checks `author_id == callerID` (→ `CredentialsError` if not), merges partial fields, recomputes slug via `domain.GenerateSlug` if title changed, runs `UPDATE`, maps unique-violation errors to `DuplicateError{Field: "title"}`. If `u.TagList != nil`, clears existing `article_tags` and re-inserts the new set. Commits, then calls `GetArticleBySlug` to return the full response.
+- `ListArticles(ctx, filter, viewerID)` builds a dynamic query with optional WHERE conditions for `tag` (EXISTS subquery, case-insensitive), `author` (direct `lower()` comparison), and `favorited` (EXISTS subquery, case-insensitive). Uses the same LEFT JOINs as `GetArticleBySlug` for `following`, `favorited`, `favoritesCount`, and `ARRAY_AGG` tag list. Adds `COUNT(*) OVER()` for the pre-limit total count. Orders by `created_at DESC` with LIMIT/OFFSET. Omits the `body` column. Returns `*domain.ArticleList` (never nil, Articles slice never nil).
 - `DeleteArticle(ctx, callerID, slug)` fetches `author_id` by slug (→ `ArticleNotFoundError` if missing), checks `author_id == callerID` (→ `CredentialsError` if not), then deletes the article. Cascade constraints on `article_tags`, `article_favorites`, and `comments` handle related row cleanup automatically.
 - `GetAllTags(ctx)` returns all tag names ordered alphabetically. Returns `[]string{}` (never nil) when there are no tags.
 
@@ -235,4 +240,6 @@ The project implements user **registration**, **login**, **get current user**, *
 - `GET /api/articles/{slug}/comments` returns all comments for an article (auth optional); `author.following` reflects the viewer's follow state. Returns 404 if the article is not found, empty array if it exists but has no comments.
 - `DELETE /api/articles/{slug}/comments/{id}` deletes a comment; returns 404 if the article or comment is not found (or comment doesn't belong to the article), 401 if the caller is not the author, 204 on success.
 - `DELETE /api/articles/{slug}` deletes an article and all related data (via cascade); returns 404 if not found, 401 if the caller is not the author, 204 on success.
-- List articles, feed, and other RealWorld endpoints are not yet built.
+- `GET /api/articles` returns a paginated, filterable list of articles (auth optional). Supports `tag`, `author`, `favorited` (case-insensitive), `limit` (default 20), and `offset` (default 0) query params. Response omits `body`; `articlesCount` is the total matching count (pre-limit).
+- `PUT /api/articles/{slug}` now also accepts `tagList` (optional): absent preserves existing tags; `[]` clears all tags; `null` returns 422.
+- Feed and other RealWorld endpoints are not yet built.

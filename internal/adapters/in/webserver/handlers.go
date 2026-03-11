@@ -33,6 +33,7 @@ type articleService interface {
 	FavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
 	UnfavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error)
 	DeleteArticle(ctx context.Context, callerID int, slug string) error
+	ListArticles(ctx context.Context, filter domain.ListArticlesFilter, viewerID int) (*domain.ArticleList, error)
 }
 
 type tagService interface {
@@ -101,6 +102,22 @@ func (n *NullableString) UnmarshalJSON(data []byte) error {
 	}
 	n.Value = &s
 	return nil
+}
+
+// NullableStringSlice distinguishes absent (Present=false), null (IsNull=true), and present slice.
+type NullableStringSlice struct {
+	Value   []string
+	Present bool
+	IsNull  bool
+}
+
+func (n *NullableStringSlice) UnmarshalJSON(data []byte) error {
+	n.Present = true
+	if string(data) == "null" {
+		n.IsNull = true
+		return nil
+	}
+	return json.Unmarshal(data, &n.Value)
 }
 
 type UpdateUserInner struct {
@@ -445,6 +462,23 @@ type ArticleResponse struct {
 	Article ArticleResponseInner `json:"article"`
 }
 
+type ArticleListItemInner struct {
+	Slug           string        `json:"slug"`
+	Title          string        `json:"title"`
+	Description    string        `json:"description"`
+	TagList        []string      `json:"tagList"`
+	CreatedAt      time.Time     `json:"createdAt"`
+	UpdatedAt      time.Time     `json:"updatedAt"`
+	Favorited      bool          `json:"favorited"`
+	FavoritesCount int           `json:"favoritesCount"`
+	Author         ArticleAuthor `json:"author"`
+}
+
+type ArticlesResponse struct {
+	Articles      []ArticleListItemInner `json:"articles"`
+	ArticlesCount int                    `json:"articlesCount"`
+}
+
 func articleResponse(a *domain.Article) ArticleResponse {
 	return ArticleResponse{
 		Article: ArticleResponseInner{
@@ -524,9 +558,10 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 }
 
 type UpdateArticleInner struct {
-	Title       *string `json:"title"`
-	Description *string `json:"description"`
-	Body        *string `json:"body"`
+	Title       *string            `json:"title"`
+	Description *string            `json:"description"`
+	Body        *string            `json:"body"`
+	TagList     NullableStringSlice `json:"tagList"`
 }
 
 type UpdateArticleRequest struct {
@@ -543,10 +578,24 @@ func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	if req.Article.TagList.Present && req.Article.TagList.IsNull {
+		w.Header().Set("Content-Type", "application/json")
+		w.WriteHeader(http.StatusUnprocessableEntity)
+		_, _ = w.Write(createErrResponse("tagList", []string{"can't be null"}))
+		return
+	}
+
 	u := domain.UpdateArticle{
 		Title:       req.Article.Title,
 		Description: req.Article.Description,
 		Body:        req.Article.Body,
+	}
+	if req.Article.TagList.Present {
+		tags := req.Article.TagList.Value
+		if tags == nil {
+			tags = []string{}
+		}
+		u.TagList = &tags
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -711,6 +760,68 @@ func (h *Handler) DeleteArticle(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.WriteHeader(http.StatusNoContent)
+}
+
+func (h *Handler) ListArticles(w http.ResponseWriter, r *http.Request) {
+	viewerID, _ := r.Context().Value(userIDKey).(int)
+
+	q := r.URL.Query()
+
+	filter := domain.ListArticlesFilter{
+		Limit:  20,
+		Offset: 0,
+	}
+	if v := q.Get("tag"); v != "" {
+		filter.Tag = &v
+	}
+	if v := q.Get("author"); v != "" {
+		filter.Author = &v
+	}
+	if v := q.Get("favorited"); v != "" {
+		filter.Favorited = &v
+	}
+	if v, err := strconv.Atoi(q.Get("limit")); err == nil {
+		filter.Limit = v
+	}
+	if v, err := strconv.Atoi(q.Get("offset")); err == nil {
+		filter.Offset = v
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+
+	list, err := h.articleService.ListArticles(r.Context(), filter, viewerID)
+	if err != nil {
+		fmt.Println(err.Error())
+		w.WriteHeader(http.StatusInternalServerError)
+		_, _ = w.Write(createErrResponse("unknown_error", []string{err.Error()}))
+		return
+	}
+
+	resp := ArticlesResponse{
+		Articles:      make([]ArticleListItemInner, 0, len(list.Articles)),
+		ArticlesCount: list.TotalCount,
+	}
+	for _, a := range list.Articles {
+		resp.Articles = append(resp.Articles, ArticleListItemInner{
+			Slug:           a.Slug,
+			Title:          a.Title,
+			Description:    a.Description,
+			TagList:        a.TagList,
+			CreatedAt:      a.CreatedAt,
+			UpdatedAt:      a.UpdatedAt,
+			Favorited:      a.Favorited,
+			FavoritesCount: a.FavoritesCount,
+			Author: ArticleAuthor{
+				Username:  a.Author.Username,
+				Bio:       a.Author.Bio,
+				Image:     a.Author.Image,
+				Following: a.Author.Following,
+			},
+		})
+	}
+
+	w.WriteHeader(http.StatusOK)
+	_ = json.NewEncoder(w).Encode(resp)
 }
 
 func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
