@@ -17,11 +17,13 @@ type userRepo interface {
 	UpdateUser(ctx context.Context, userID int, u *UpdateUserData) (*User, error)
 }
 
+// UserController implements the user management use-cases of the domain.
 type UserController struct {
 	repo      userRepo
 	jwtSecret string
 }
 
+// New creates a UserController backed by the given repository and JWT signing secret.
 func New(r userRepo, jwtSecret string) *UserController {
 	return &UserController{
 		repo:      r,
@@ -29,6 +31,8 @@ func New(r userRepo, jwtSecret string) *UserController {
 	}
 }
 
+// RegisterUser validates the registration request, hashes the password, persists the
+// new account, and returns the created user with a fresh JWT token.
 func (c *UserController) RegisterUser(ctx context.Context, u *RegisterUser) (*User, error) {
 	if err := validateRegisterUser(u); err != nil {
 		return nil, err
@@ -63,6 +67,7 @@ func generateToken(id int, secret string) (string, error) {
 	return token.SignedString([]byte(secret))
 }
 
+// LoginUser authenticates the user with the provided credentials and returns the user with a fresh JWT token.
 func (c *UserController) LoginUser(ctx context.Context, u *LoginUser) (*User, error) {
 	if u.Email == "" {
 		return nil, NewValidationError("email", blankFieldErrMsg)
@@ -93,6 +98,7 @@ func (c *UserController) LoginUser(ctx context.Context, u *LoginUser) (*User, er
 	return user, nil
 }
 
+// GetUser retrieves the currently authenticated user by ID and returns it with a refreshed JWT token.
 func (c *UserController) GetUser(ctx context.Context, userID int) (*User, error) {
 	user, err := c.repo.GetUserByID(ctx, userID)
 	if err != nil {
@@ -108,6 +114,7 @@ func (c *UserController) GetUser(ctx context.Context, userID int) (*User, error)
 	return user, nil
 }
 
+// UpdateUser applies the supplied changes to the user record and returns the updated user with a fresh JWT token.
 func (c *UserController) UpdateUser(ctx context.Context, userID int, u *UpdateUser) (*User, error) {
 	if err := validateUpdateUser(u); err != nil {
 		return nil, err

@@ -47,6 +47,8 @@ type commentService interface {
 	DeleteComment(ctx context.Context, callerID int, articleSlug string, commentID int) error
 }
 
+// Handler is the HTTP adapter that translates incoming requests into domain service calls
+// and writes the corresponding JSON responses.
 type Handler struct {
 	service        userService
 	profileService profileService
@@ -55,6 +57,7 @@ type Handler struct {
 	commentService commentService
 }
 
+// NewHandler creates a Handler wired to the provided domain service implementations.
 func NewHandler(s userService, ps profileService, as articleService, ts tagService, cs commentService) *Handler {
 	return &Handler{
 		service:        s,
@@ -65,21 +68,25 @@ func NewHandler(s userService, ps profileService, as articleService, ts tagServi
 	}
 }
 
+// LoginUserInner holds the credentials fields within a login request body.
 type LoginUserInner struct {
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// LoginUserRequest is the top-level JSON wrapper for POST /api/users/login.
 type LoginUserRequest struct {
 	User LoginUserInner `json:"user"`
 }
 
+// RegisterUserInner holds the registration fields within a registration request body.
 type RegisterUserInner struct {
 	Username string `json:"username"`
 	Email    string `json:"email"`
 	Password string `json:"password"`
 }
 
+// RegisterUserRequest is the top-level JSON wrapper for POST /api/users.
 type RegisterUserRequest struct {
 	User RegisterUserInner `json:"user"`
 }
@@ -91,6 +98,7 @@ type NullableString struct {
 	Present bool
 }
 
+// UnmarshalJSON implements json.Unmarshaler for NullableString.
 func (n *NullableString) UnmarshalJSON(data []byte) error {
 	n.Present = true
 	if string(data) == "null" {
@@ -112,6 +120,7 @@ type NullableStringSlice struct {
 	IsNull  bool
 }
 
+// UnmarshalJSON implements json.Unmarshaler for NullableStringSlice.
 func (n *NullableStringSlice) UnmarshalJSON(data []byte) error {
 	n.Present = true
 	if string(data) == "null" {
@@ -121,6 +130,7 @@ func (n *NullableStringSlice) UnmarshalJSON(data []byte) error {
 	return json.Unmarshal(data, &n.Value)
 }
 
+// UpdateUserInner holds the optional fields within a user update request body.
 type UpdateUserInner struct {
 	Email    *string        `json:"email"`
 	Bio      NullableString `json:"bio"`
@@ -129,10 +139,12 @@ type UpdateUserInner struct {
 	Password *string        `json:"password"`
 }
 
+// UpdateUserRequest is the top-level JSON wrapper for PUT /api/user.
 type UpdateUserRequest struct {
 	User UpdateUserInner `json:"user"`
 }
 
+// UserResponseInner holds the user fields returned in API responses.
 type UserResponseInner struct {
 	Email    string  `json:"email"`
 	Token    string  `json:"token"`
@@ -141,14 +153,17 @@ type UserResponseInner struct {
 	Image    *string `json:"image"`
 }
 
+// UserResponse is the top-level JSON wrapper for user API responses.
 type UserResponse struct {
 	User UserResponseInner `json:"user"`
 }
 
+// ErrorResponse is the standard JSON error envelope returned by the API.
 type ErrorResponse struct {
 	Errors map[string][]string `json:"errors"`
 }
 
+// RegisterUser handles POST /api/users and creates a new user account.
 func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	var regUser RegisterUserRequest
 	err := json.NewDecoder(r.Body).Decode(&regUser)
@@ -195,6 +210,7 @@ func (h *Handler) RegisterUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// LoginUser handles POST /api/users/login and authenticates a user.
 func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	var req LoginUserRequest
 	err := json.NewDecoder(r.Body).Decode(&req)
@@ -240,6 +256,7 @@ func (h *Handler) LoginUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// GetUser handles GET /api/user and returns the currently authenticated user.
 func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(userIDKey).(int)
 
@@ -270,6 +287,7 @@ func (h *Handler) GetUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// UpdateUser handles PUT /api/user and updates the currently authenticated user's profile.
 func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(userIDKey).(int)
 
@@ -334,6 +352,7 @@ func (h *Handler) UpdateUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// ProfileResponseInner holds the profile fields returned in API responses.
 type ProfileResponseInner struct {
 	Username  string  `json:"username"`
 	Bio       *string `json:"bio"`
@@ -341,6 +360,7 @@ type ProfileResponseInner struct {
 	Following bool    `json:"following"`
 }
 
+// ProfileResponse is the top-level JSON wrapper for profile API responses.
 type ProfileResponse struct {
 	Profile ProfileResponseInner `json:"profile"`
 }
@@ -380,6 +400,7 @@ func writeProfileErr(w http.ResponseWriter, err error) {
 	}
 }
 
+// GetProfile handles GET /api/profiles/{username} and returns the requested user profile.
 func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	profileUsername := mux.Vars(r)["username"]
 	viewerID, _ := r.Context().Value(userIDKey).(int)
@@ -396,6 +417,7 @@ func (h *Handler) GetProfile(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(profileResponse(profile))
 }
 
+// FollowUser handles POST /api/profiles/{username}/follow and subscribes the caller to the target user.
 func (h *Handler) FollowUser(w http.ResponseWriter, r *http.Request) {
 	followerID := r.Context().Value(userIDKey).(int)
 	followeeUsername := mux.Vars(r)["username"]
@@ -412,6 +434,7 @@ func (h *Handler) FollowUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(profileResponse(profile))
 }
 
+// UnfollowUser handles DELETE /api/profiles/{username}/follow and removes the caller's subscription.
 func (h *Handler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
 	followerID := r.Context().Value(userIDKey).(int)
 	followeeUsername := mux.Vars(r)["username"]
@@ -428,6 +451,7 @@ func (h *Handler) UnfollowUser(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(profileResponse(profile))
 }
 
+// CreateArticleInner holds the article fields within a create-article request body.
 type CreateArticleInner struct {
 	Title       string   `json:"title"`
 	Description string   `json:"description"`
@@ -435,10 +459,12 @@ type CreateArticleInner struct {
 	TagList     []string `json:"tagList"`
 }
 
+// CreateArticleRequest is the top-level JSON wrapper for POST /api/articles.
 type CreateArticleRequest struct {
 	Article CreateArticleInner `json:"article"`
 }
 
+// ArticleAuthor holds the author profile fields embedded in article API responses.
 type ArticleAuthor struct {
 	Username  string  `json:"username"`
 	Bio       *string `json:"bio"`
@@ -446,6 +472,7 @@ type ArticleAuthor struct {
 	Following bool    `json:"following"`
 }
 
+// ArticleResponseInner holds the full article fields returned in single-article API responses.
 type ArticleResponseInner struct {
 	Slug           string        `json:"slug"`
 	Title          string        `json:"title"`
@@ -459,10 +486,12 @@ type ArticleResponseInner struct {
 	Author         ArticleAuthor `json:"author"`
 }
 
+// ArticleResponse is the top-level JSON wrapper for single-article API responses.
 type ArticleResponse struct {
 	Article ArticleResponseInner `json:"article"`
 }
 
+// ArticleListItemInner holds the article fields (without body) used in list API responses.
 type ArticleListItemInner struct {
 	Slug           string        `json:"slug"`
 	Title          string        `json:"title"`
@@ -475,6 +504,7 @@ type ArticleListItemInner struct {
 	Author         ArticleAuthor `json:"author"`
 }
 
+// ArticlesResponse is the top-level JSON wrapper for article list API responses.
 type ArticlesResponse struct {
 	Articles      []ArticleListItemInner `json:"articles"`
 	ArticlesCount int                    `json:"articlesCount"`
@@ -502,6 +532,7 @@ func articleResponse(a *domain.Article) ArticleResponse {
 	}
 }
 
+// CreateArticle handles POST /api/articles and publishes a new article.
 func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 	authorID := r.Context().Value(userIDKey).(int)
 
@@ -542,6 +573,7 @@ func (h *Handler) CreateArticle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
+// GetArticle handles GET /api/articles/{slug} and returns a single article.
 func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 	slug := mux.Vars(r)["slug"]
 	viewerID, _ := r.Context().Value(userIDKey).(int)
@@ -558,17 +590,20 @@ func (h *Handler) GetArticle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
+// UpdateArticleInner holds the optional fields within an update-article request body.
 type UpdateArticleInner struct {
-	Title       *string            `json:"title"`
-	Description *string            `json:"description"`
-	Body        *string            `json:"body"`
+	Title       *string             `json:"title"`
+	Description *string             `json:"description"`
+	Body        *string             `json:"body"`
 	TagList     NullableStringSlice `json:"tagList"`
 }
 
+// UpdateArticleRequest is the top-level JSON wrapper for PUT /api/articles/{slug}.
 type UpdateArticleRequest struct {
 	Article UpdateArticleInner `json:"article"`
 }
 
+// UpdateArticle handles PUT /api/articles/{slug} and applies partial updates to an article.
 func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 	callerID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -627,6 +662,7 @@ func (h *Handler) UpdateArticle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
+// FavoriteArticle handles POST /api/articles/{slug}/favorite and marks an article as favorited.
 func (h *Handler) FavoriteArticle(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -643,6 +679,7 @@ func (h *Handler) FavoriteArticle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
+// UnfavoriteArticle handles DELETE /api/articles/{slug}/favorite and removes the favorite mark.
 func (h *Handler) UnfavoriteArticle(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -659,6 +696,7 @@ func (h *Handler) UnfavoriteArticle(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(articleResponse(article))
 }
 
+// CommentAuthor holds the author profile fields embedded in comment API responses.
 type CommentAuthor struct {
 	Username  string  `json:"username"`
 	Bio       *string `json:"bio"`
@@ -666,6 +704,7 @@ type CommentAuthor struct {
 	Following bool    `json:"following"`
 }
 
+// CommentResponseInner holds the comment fields returned in comment API responses.
 type CommentResponseInner struct {
 	ID        int           `json:"id"`
 	CreatedAt time.Time     `json:"createdAt"`
@@ -674,14 +713,17 @@ type CommentResponseInner struct {
 	Author    CommentAuthor `json:"author"`
 }
 
+// CommentResponse is the top-level JSON wrapper for single-comment API responses.
 type CommentResponse struct {
 	Comment CommentResponseInner `json:"comment"`
 }
 
+// CommentsResponse is the top-level JSON wrapper for comment list API responses.
 type CommentsResponse struct {
 	Comments []CommentResponseInner `json:"comments"`
 }
 
+// CreateArticleComment handles POST /api/articles/{slug}/comments and adds a comment to an article.
 func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
 	authorID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -733,6 +775,7 @@ func (h *Handler) CreateArticleComment(w http.ResponseWriter, r *http.Request) {
 	})
 }
 
+// DeleteArticle handles DELETE /api/articles/{slug} and removes an article authored by the caller.
 func (h *Handler) DeleteArticle(w http.ResponseWriter, r *http.Request) {
 	callerID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -759,6 +802,7 @@ func (h *Handler) DeleteArticle(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// ListArticles handles GET /api/articles and returns a filtered, paginated list of articles.
 func (h *Handler) ListArticles(w http.ResponseWriter, r *http.Request) {
 	viewerID, _ := r.Context().Value(userIDKey).(int)
 
@@ -821,6 +865,7 @@ func (h *Handler) ListArticles(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// GetArticleFeed handles GET /api/articles/feed and returns articles from followed authors.
 func (h *Handler) GetArticleFeed(w http.ResponseWriter, r *http.Request) {
 	userID := r.Context().Value(userIDKey).(int)
 
@@ -874,6 +919,7 @@ func (h *Handler) GetArticleFeed(w http.ResponseWriter, r *http.Request) {
 	_ = json.NewEncoder(w).Encode(resp)
 }
 
+// DeleteArticleComment handles DELETE /api/articles/{slug}/comments/{id} and removes a comment authored by the caller.
 func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
 	callerID := r.Context().Value(userIDKey).(int)
 	slug := mux.Vars(r)["slug"]
@@ -912,6 +958,7 @@ func (h *Handler) DeleteArticleComment(w http.ResponseWriter, r *http.Request) {
 	w.WriteHeader(http.StatusNoContent)
 }
 
+// GetArticleComments handles GET /api/articles/{slug}/comments and returns all comments on an article.
 func (h *Handler) GetArticleComments(w http.ResponseWriter, r *http.Request) {
 	slug := mux.Vars(r)["slug"]
 	viewerID, _ := r.Context().Value(userIDKey).(int)
@@ -962,10 +1009,12 @@ func createErrResponse(k string, v []string) []byte {
 	return jsonErrResp
 }
 
+// TagsResponse is the top-level JSON wrapper for the tags listing API response.
 type TagsResponse struct {
 	Tags []string `json:"tags"`
 }
 
+// GetTags handles GET /api/tags and returns all tags used on published articles.
 func (h *Handler) GetTags(w http.ResponseWriter, r *http.Request) {
 	w.Header().Set("Content-Type", "application/json")
 

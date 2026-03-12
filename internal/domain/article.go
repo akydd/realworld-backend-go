@@ -8,6 +8,8 @@ import (
 
 var nonAlphanumRe = regexp.MustCompile(`[^a-z0-9]+`)
 
+// GenerateSlug converts a title into a URL-safe slug by lowercasing it and
+// replacing runs of non-alphanumeric characters with hyphens.
 func GenerateSlug(title string) string {
 	lower := strings.ToLower(title)
 	slug := nonAlphanumRe.ReplaceAllString(lower, "-")
@@ -60,14 +62,18 @@ type articleRepo interface {
 	FeedArticles(ctx context.Context, filter ArticleFeedFilter, viewerID int) (*ArticleList, error)
 }
 
+// ArticleController implements the article management use-cases of the domain.
 type ArticleController struct {
 	repo articleRepo
 }
 
+// NewArticleController creates an ArticleController backed by the given repository.
 func NewArticleController(r articleRepo) *ArticleController {
 	return &ArticleController{repo: r}
 }
 
+// CreateArticle validates the request, deduplicates tags, generates a slug from the title,
+// and persists the new article.
 func (c *ArticleController) CreateArticle(ctx context.Context, authorID int, a *CreateArticle) (*Article, error) {
 	if err := validateCreateArticle(a); err != nil {
 		return nil, err
@@ -80,10 +86,12 @@ func (c *ArticleController) CreateArticle(ctx context.Context, authorID int, a *
 	return c.repo.InsertArticle(ctx, authorID, slug, a)
 }
 
+// GetArticleBySlug retrieves a single article by its slug, enriching it with viewer-specific data.
 func (c *ArticleController) GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*Article, error) {
 	return c.repo.GetArticleBySlug(ctx, slug, viewerID)
 }
 
+// UpdateArticle validates and applies the supplied changes to the article identified by slug.
 func (c *ArticleController) UpdateArticle(ctx context.Context, callerID int, slug string, u *UpdateArticle) (*Article, error) {
 	if err := validateUpdateArticle(u); err != nil {
 		return nil, err
@@ -91,22 +99,27 @@ func (c *ArticleController) UpdateArticle(ctx context.Context, callerID int, slu
 	return c.repo.UpdateArticle(ctx, callerID, slug, u)
 }
 
+// FavoriteArticle marks the article identified by slug as favorited by the given user.
 func (c *ArticleController) FavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error) {
 	return c.repo.FavoriteArticle(ctx, userID, slug)
 }
 
+// UnfavoriteArticle removes the favorite mark from the article identified by slug for the given user.
 func (c *ArticleController) UnfavoriteArticle(ctx context.Context, userID int, slug string) (*Article, error) {
 	return c.repo.UnfavoriteArticle(ctx, userID, slug)
 }
 
+// DeleteArticle removes the article identified by slug if the caller is its author.
 func (c *ArticleController) DeleteArticle(ctx context.Context, callerID int, slug string) error {
 	return c.repo.DeleteArticle(ctx, callerID, slug)
 }
 
+// ListArticles returns a paginated, optionally filtered list of articles from the global feed.
 func (c *ArticleController) ListArticles(ctx context.Context, filter ListArticlesFilter, viewerID int) (*ArticleList, error) {
 	return c.repo.ListArticles(ctx, filter, viewerID)
 }
 
+// FeedArticles returns a paginated list of articles from authors the viewer follows.
 func (c *ArticleController) FeedArticles(ctx context.Context, filter ArticleFeedFilter, viewerID int) (*ArticleList, error) {
 	return c.repo.FeedArticles(ctx, filter, viewerID)
 }
