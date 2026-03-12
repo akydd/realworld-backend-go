@@ -10,11 +10,14 @@ import (
 	"github.com/gorilla/mux"
 )
 
+// Server wraps the HTTP router and manages the lifecycle of the web server.
 type Server struct {
 	port   string
 	router http.Handler
 }
 
+// ServerHandlers is the port (in the hexagonal-architecture sense) that the web
+// server uses to dispatch every HTTP request to an application handler.
 type ServerHandlers interface {
 	RegisterUser(http.ResponseWriter, *http.Request)
 	LoginUser(http.ResponseWriter, *http.Request)
@@ -37,6 +40,8 @@ type ServerHandlers interface {
 	GetTags(http.ResponseWriter, *http.Request)
 }
 
+// NewServer constructs a Server, wires all API routes to the supplied handlers,
+// and applies authentication middleware to protected and optional-auth routes.
 func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error) {
 	r := mux.NewRouter()
 	r.HandleFunc("/api/users", h.RegisterUser).Methods("POST")
@@ -74,10 +79,12 @@ func NewServer(port string, h ServerHandlers, jwtSecret string) (*Server, error)
 	}, nil
 }
 
+// Start begins listening for HTTP connections on the configured port and blocks until the server exits.
 func (s *Server) Start() {
 	log.Fatal(http.ListenAndServe(fmt.Sprintf(":%s", s.port), s.router))
 }
 
+// Stop is a placeholder for graceful shutdown logic.
 func (s *Server) Stop() {
 
 }

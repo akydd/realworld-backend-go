@@ -19,10 +19,12 @@ import (
 //go:embed migrations/*.sql
 var embedMigrations embed.FS
 
+// Postgres is the PostgreSQL adapter that satisfies all repository interfaces used by the domain layer.
 type Postgres struct {
 	db *sqlx.DB
 }
 
+// DBConfig holds the connection parameters required to open a PostgreSQL database.
 type DBConfig struct {
 	Host     string
 	Port     string
@@ -54,6 +56,8 @@ func validateConfig(c *DBConfig) error {
 	return nil
 }
 
+// New opens a PostgreSQL connection using the provided config, runs all pending
+// database migrations via goose, and returns a ready-to-use Postgres adapter.
 func New(config *DBConfig) (*Postgres, error) {
 	if err := validateConfig(config); err != nil {
 		return nil, err
@@ -136,6 +140,8 @@ func convertProfile(r profileRow) *domain.Profile {
 	return p
 }
 
+// GetProfileByUsername retrieves the public profile of the user with the given username,
+// setting the Following flag based on whether viewerID follows that user.
 func (p *Postgres) GetProfileByUsername(ctx context.Context, profileUsername string, viewerID int) (*domain.Profile, error) {
 	query := `
 		SELECT u.username, u.bio, u.image,
@@ -156,6 +162,8 @@ func (p *Postgres) GetProfileByUsername(ctx context.Context, profileUsername str
 	return convertProfile(row), nil
 }
 
+// FollowUser records a follow relationship from followerID to the user identified by followeeUsername
+// and returns the updated profile.
 func (p *Postgres) FollowUser(ctx context.Context, followerID int, followeeUsername string) (*domain.Profile, error) {
 	var followeeID int
 	err := p.db.QueryRowxContext(ctx, "SELECT id FROM users WHERE username = $1", followeeUsername).Scan(&followeeID)
@@ -176,6 +184,8 @@ func (p *Postgres) FollowUser(ctx context.Context, followerID int, followeeUsern
 	return p.GetProfileByUsername(ctx, followeeUsername, followerID)
 }
 
+// UnfollowUser removes the follow relationship from followerID to the user identified by followeeUsername
+// and returns the updated profile.
 func (p *Postgres) UnfollowUser(ctx context.Context, followerID int, followeeUsername string) (*domain.Profile, error) {
 	var followeeID int
 	err := p.db.QueryRowxContext(ctx, "SELECT id FROM users WHERE username = $1", followeeUsername).Scan(&followeeID)
@@ -196,6 +206,7 @@ func (p *Postgres) UnfollowUser(ctx context.Context, followerID int, followeeUse
 	return p.GetProfileByUsername(ctx, followeeUsername, followerID)
 }
 
+// GetUserByID retrieves a user by their primary-key ID, returning a CredentialsError if not found.
 func (p *Postgres) GetUserByID(ctx context.Context, id int) (*domain.User, error) {
 	query := "SELECT id, username, email, bio, image FROM users WHERE id = $1"
 	var dbUser user
@@ -212,6 +223,7 @@ func (p *Postgres) GetUserByID(ctx context.Context, id int) (*domain.User, error
 	return &u, nil
 }
 
+// GetFullUserByID retrieves a user together with their hashed password by primary-key ID.
 func (p *Postgres) GetFullUserByID(ctx context.Context, id int) (*domain.User, string, error) {
 	query := "SELECT id, username, email, bio, image, password FROM users WHERE id = $1"
 	var dbUser userWithPassword
@@ -228,6 +240,7 @@ func (p *Postgres) GetFullUserByID(ctx context.Context, id int) (*domain.User, s
 	return &u, dbUser.Password, nil
 }
 
+// UpdateUser writes the fully resolved UpdateUserData to the users table and returns the updated record.
 func (p *Postgres) UpdateUser(ctx context.Context, userID int, u *domain.UpdateUserData) (*domain.User, error) {
 	query := `UPDATE users SET email=$1, username=$2, password=$3, bio=$4, image=$5 WHERE id=$6 RETURNING id, username, email, bio, image`
 	var dbUser user
@@ -250,6 +263,7 @@ func (p *Postgres) UpdateUser(ctx context.Context, userID int, u *domain.UpdateU
 	return &updated, nil
 }
 
+// GetUserByEmail retrieves a user together with their hashed password by email address.
 func (p *Postgres) GetUserByEmail(ctx context.Context, email string) (*domain.User, string, error) {
 	query := "SELECT id, username, email, bio, image, password FROM users WHERE email = $1"
 	var dbUser userWithPassword
@@ -277,6 +291,7 @@ type articleRow struct {
 	UpdatedAt   time.Time `db:"updated_at"`
 }
 
+// InsertArticle persists a new article (with tags) in a transaction, auto-disambiguating the slug if needed.
 func (p *Postgres) InsertArticle(ctx context.Context, authorID int, slug string, a *domain.CreateArticle) (*domain.Article, error) {
 	tx, err := p.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -392,6 +407,8 @@ type articleWithTagsRow struct {
 	FavoritesCount int            `db:"favorites_count"`
 }
 
+// GetArticleBySlug retrieves a single article by slug, enriched with viewer-specific favorited and
+// following flags.
 func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID int) (*domain.Article, error) {
 	query := `
 		SELECT
@@ -458,6 +475,7 @@ func (p *Postgres) GetArticleBySlug(ctx context.Context, slug string, viewerID i
 	}, nil
 }
 
+// FavoriteArticle inserts a favorite record for the given user and article and returns the updated article.
 func (p *Postgres) FavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error) {
 	_, err := p.db.ExecContext(ctx,
 		`INSERT INTO article_favorites (user_id, article_id)
@@ -470,6 +488,7 @@ func (p *Postgres) FavoriteArticle(ctx context.Context, userID int, slug string)
 	return p.GetArticleBySlug(ctx, slug, userID)
 }
 
+// UnfavoriteArticle removes the favorite record for the given user and article and returns the updated article.
 func (p *Postgres) UnfavoriteArticle(ctx context.Context, userID int, slug string) (*domain.Article, error) {
 	_, err := p.db.ExecContext(ctx,
 		`DELETE FROM article_favorites
@@ -481,6 +500,8 @@ func (p *Postgres) UnfavoriteArticle(ctx context.Context, userID int, slug strin
 	return p.GetArticleBySlug(ctx, slug, userID)
 }
 
+// UpdateArticle applies partial updates to the article identified by slug in a transaction,
+// enforcing authorship and auto-disambiguating the new slug when the title changes.
 func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string, u *domain.UpdateArticle) (*domain.Article, error) {
 	tx, err := p.db.BeginTxx(ctx, nil)
 	if err != nil {
@@ -578,6 +599,7 @@ func (p *Postgres) UpdateArticle(ctx context.Context, callerID int, slug string,
 	return p.GetArticleBySlug(ctx, newSlug, callerID)
 }
 
+// InsertComment persists a new comment on the article identified by articleSlug and returns the created comment.
 func (p *Postgres) InsertComment(ctx context.Context, authorID int, articleSlug string, c *domain.CreateComment) (*domain.Comment, error) {
 	query := `
 		WITH ins AS (
@@ -627,6 +649,8 @@ func (p *Postgres) InsertComment(ctx context.Context, authorID int, articleSlug 
 	}, nil
 }
 
+// GetCommentsByArticleSlug retrieves all comments for the article identified by articleSlug,
+// ordered by creation time ascending.
 func (p *Postgres) GetCommentsByArticleSlug(ctx context.Context, articleSlug string, viewerID int) ([]*domain.Comment, error) {
 	var articleID int
 	err := p.db.QueryRowxContext(ctx, `SELECT id FROM articles WHERE slug = $1`, articleSlug).Scan(&articleID)
@@ -778,6 +802,7 @@ func convertListRows(rows []listRow) *domain.ArticleList {
 	return result
 }
 
+// ListArticles returns a paginated, optionally filtered list of articles from the global feed.
 func (p *Postgres) ListArticles(ctx context.Context, filter domain.ListArticlesFilter, viewerID int) (*domain.ArticleList, error) {
 	args := []any{viewerID}
 	nextArg := func(v any) string {
@@ -812,6 +837,7 @@ func (p *Postgres) ListArticles(ctx context.Context, filter domain.ListArticlesF
 	return convertListRows(rows), nil
 }
 
+// FeedArticles returns a paginated list of articles from authors that viewerID follows.
 func (p *Postgres) FeedArticles(ctx context.Context, filter domain.ArticleFeedFilter, viewerID int) (*domain.ArticleList, error) {
 	args := []any{viewerID}
 	conditions := []string{"f.follower_id IS NOT NULL"}
@@ -825,6 +851,7 @@ func (p *Postgres) FeedArticles(ctx context.Context, filter domain.ArticleFeedFi
 	return convertListRows(rows), nil
 }
 
+// DeleteArticle removes the article identified by slug if callerID is its author.
 func (p *Postgres) DeleteArticle(ctx context.Context, callerID int, slug string) error {
 	var authorID int
 	err := p.db.QueryRowxContext(ctx, `SELECT author_id FROM articles WHERE slug = $1`, slug).Scan(&authorID)
@@ -843,6 +870,7 @@ func (p *Postgres) DeleteArticle(ctx context.Context, callerID int, slug string)
 	return err
 }
 
+// DeleteComment removes the comment identified by commentID from the given article if callerID is its author.
 func (p *Postgres) DeleteComment(ctx context.Context, callerID int, articleSlug string, commentID int) error {
 	var articleID int
 	err := p.db.QueryRowxContext(ctx, `SELECT id FROM articles WHERE slug = $1`, articleSlug).Scan(&articleID)
@@ -872,6 +900,7 @@ func (p *Postgres) DeleteComment(ctx context.Context, callerID int, articleSlug 
 	return err
 }
 
+// GetAllTags returns all tag names stored in the database, ordered alphabetically.
 func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	var tags []string
 	err := p.db.SelectContext(ctx, &tags, `SELECT name FROM tags ORDER BY name`)
@@ -884,6 +913,7 @@ func (p *Postgres) GetAllTags(ctx context.Context) ([]string, error) {
 	return tags, nil
 }
 
+// InsertUser persists a new user record and returns the created user without the hashed password.
 func (p *Postgres) InsertUser(ctx context.Context, u *domain.RegisterUser) (*domain.User, error) {
 	query := "insert into users (username, email, password) values ($1, $2, $3) returning id, username, email, bio, image"
 	var dbUser user
