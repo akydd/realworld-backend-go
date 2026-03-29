@@ -16,9 +16,10 @@ func main() {
 	// load configs
 	envFile := flag.String("env", ".env", "path to env file")
 	flag.Parse()
-	err := godotenv.Load(*envFile)
-	if err != nil {
-		log.Fatal(err)
+	if _, err := os.Stat(*envFile); err == nil {
+		if err := godotenv.Load(*envFile); err != nil {
+			log.Fatal(err)
+		}
 	}
 
 	// Setup all dependencies
