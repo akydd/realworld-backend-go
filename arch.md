@@ -63,6 +63,10 @@ realworld-backend-go/
 │   ├── pagination_test.go
 │   ├── errors_test.go
 │   └── streaming_test.go             # LiveArticleFeed, LiveCommentFeed, slug isolation
+├── certs/                            # Dev TLS certificates (public .crt only; .key in .gitignore)
+│   ├── ca.crt                        # Self-signed CA certificate
+│   ├── server.crt                    # Server certificate (signed by CA, SAN: localhost/127.0.0.1)
+│   └── client.crt                    # Client certificate (signed by CA)
 ├── compose.yaml                      # Docker Compose (prod DB)
 ├── compose.test.yaml                 # Docker Compose (test DB)
 ├── Makefile                          # make int-tests / make int-tests-grpc
@@ -137,6 +141,10 @@ Handles the HTTP protocol layer:
 ### Inbound Adapter — gRPC (`internal/adapters/in/grpc/`)
 
 Runs on a separate port (`GRPC_PORT`) alongside the HTTP server. Both servers are started concurrently from `cmd/server/server.go`; both delegate to the same domain controller instances, so there is no business logic duplication.
+
+**Transport security** — the gRPC server requires mTLS. `setupTLSCreds()` (in `cmd/server/server.go`) reads the server certificate, private key, and CA certificate from the file paths in `GRPC_TLS_CERT`, `GRPC_TLS_KEY`, and `GRPC_TLS_CA`. It builds a `tls.Config` with `ClientAuth: tls.RequireAndVerifyClientCert`, `MinVersion: tls.VersionTLS13`, and passes the resulting credentials to `grpc.NewServer` via `grpc.Creds(creds)`. Clients must present a certificate signed by the same CA; any connection without a valid client cert is rejected at the TLS handshake before reaching any interceptor or handler.
+
+In local development the certs are self-signed files in `certs/`. In production, the PEM strings are stored in AWS Secrets Manager and injected at container startup.
 
 **`server.go`** — `NewGrpcServer` registers all five service servers (`UserServiceServer`, `ArticleServiceServer`, `ProfileServiceServer`, `CommentServiceServer`, `TagServiceServer`) and enables gRPC reflection so tools like `grpcurl` can discover the API at runtime.
 
@@ -285,6 +293,9 @@ Loaded from `.env` / `.env_test` via `godotenv`:
 | `DB_USER` | admin | |
 | `DB_PASSWORD` | password | |
 | `DB_NAME` | app | Database name (test: test-app) |
+| `GRPC_TLS_CERT` | — | Path to server TLS certificate (PEM) |
+| `GRPC_TLS_KEY` | — | Path to server TLS private key (PEM) |
+| `GRPC_TLS_CA` | — | Path to CA certificate used to verify client certs (PEM) |
 
 ## Infrastructure (Docker)
 

@@ -37,6 +37,13 @@ resource "aws_security_group" "ecs" {
     security_groups = [aws_security_group.load-balancer.id]
   }
 
+  ingress {
+    from_port       = 8099
+    to_port         = 8099
+    protocol        = "tcp"
+    security_groups = [aws_security_group.grpc-client.id]
+  }
+
   egress {
     from_port   = 0
     to_port     = 0
@@ -59,4 +66,12 @@ resource "aws_security_group" "rds" {
   }
 
   tags = { Name = "rds-sg" }
+}
+
+# No grpc client have been implemented, but they'd need to use this security group.
+resource "aws_security_group" "grpc-client" {
+  name   = "grpc-client-sg"
+  vpc_id = aws_vpc.main.id
+
+  tags = { Name = "grpc-client-sg" }
 }

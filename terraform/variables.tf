@@ -24,3 +24,21 @@ variable "alerts_email" {
   description = "Email that receives alerts"
   type        = string
 }
+
+variable "ca_cert" {
+  description = "CA Certificate"
+  type        = string
+  sensitive   = true
+}
+
+variable "server_cert" {
+  description = "Server certificate"
+  type        = string
+  sensitive   = true
+}
+
+variable "server_key" {
+  description = "Server key"
+  type        = string
+  sensitive   = true
+}

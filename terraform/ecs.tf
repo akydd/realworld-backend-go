@@ -122,7 +122,10 @@ resource "aws_iam_role_policy" "ecs_task_execution_secrets" {
       Action = ["secretsmanager:GetSecretValue"]
       Resource = [
         aws_secretsmanager_secret.db_password.arn,
-        aws_secretsmanager_secret.jwt_secret.arn
+        aws_secretsmanager_secret.jwt_secret.arn,
+        aws_secretsmanager_secret.ca_cert.arn,
+        aws_secretsmanager_secret.server_cert.arn,
+        aws_secretsmanager_secret.server_key.arn
       ]
     }]
   })
@@ -178,22 +181,32 @@ resource "aws_ecs_task_definition" "app" {
     image     = "${aws_ecr_repository.app.repository_url}:latest"
     essential = true
 
-    portMappings = [{
-      containerPort = 8090
-      protocol      = "tcp"
-    }]
+    portMappings = [
+      {
+        containerPort = 8090
+        protocol      = "tcp"
+      },
+      {
+        containerPort = 8099
+        protocol      = "tcp"
+      }
+    ]
 
     environment = [
       { name = "DB_HOST", value = aws_db_instance.main.address },
       { name = "DB_PORT", value = "5432" },
       { name = "DB_NAME", value = var.db_name },
       { name = "DB_USER", value = var.db_username },
-      { name = "SERVER_PORT", value = "8090" }
+      { name = "SERVER_PORT", value = "8090" },
+      { name = "GRPC_PORT", value = "8099" }
     ]
 
     secrets = [
       { name = "DB_PASSWORD", valueFrom = aws_secretsmanager_secret.db_password.arn },
-      { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt_secret.arn }
+      { name = "JWT_SECRET", valueFrom = aws_secretsmanager_secret.jwt_secret.arn },
+      { name = "GRPC_TLS_CERT", valueFrom = aws_secretsmanager_secret.server_cert.arn },
+      { name = "GRPC_TLS_KEY", valueFrom = aws_secretsmanager_secret.server_key.arn },
+      { name = "GRPC_TLS_CA", valueFrom = aws_secretsmanager_secret.ca_cert.arn }
     ]
 
     logConfiguration = {

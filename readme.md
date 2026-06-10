@@ -18,7 +18,9 @@ A [RealWorld](https://github.com/gothinkster/realworld) spec-compliant backend A
 
 **Separate task execution role and task role** — the execution role has the minimum permissions needed to start a container (pull from ECR, write logs, read secrets). The task role holds only the permissions the running application needs. Compromise of one does not imply compromise of the other.
 
-**Secrets Manager over environment variables** — `DB_PASSWORD` and `JWT_SECRET` are stored in AWS Secrets Manager and injected at container startup. They are never committed to source control or stored in CI.
+**Secrets Manager over environment variables** — `DB_PASSWORD`, `JWT_SECRET`, and the three mTLS secrets (`GRPC_TLS_CA`, `GRPC_TLS_CERT`, `GRPC_TLS_KEY`) are stored in AWS Secrets Manager and injected at container startup. They are never committed to source control or stored in CI.
+
+**Mutual TLS on the gRPC server** — the gRPC server requires mTLS: both the server and any connecting client must present a certificate signed by the shared CA. This provides transport encryption, server identity verification, and client authentication at the network layer — without application-layer credentials. Self-signed certificates for local development are committed to `certs/`; in production the PEM strings are stored in Secrets Manager.
 
 **Observability via CloudWatch** — ECS CPU/memory, RDS CPU/connections, and ALB 5xx error rate are monitored with CloudWatch alarms. Breaches trigger SNS email notifications, enabling rapid response to availability and performance issues.
 
@@ -52,7 +54,7 @@ The app runs on AWS in `ca-west-1` using the following services:
 - **Application Load Balancer** — receives inbound HTTP traffic on port 80 and forwards to Fargate tasks on port 8090
 - **RDS PostgreSQL 17** — database in private subnets, only reachable from ECS tasks
 - **ECR** — stores Docker images pushed by the CI pipeline
-- **Secrets Manager** — holds `DB_PASSWORD` and `JWT_SECRET`, injected into containers at startup
+- **Secrets Manager** — holds `DB_PASSWORD`, `JWT_SECRET`, and the three mTLS PEM secrets (`GRPC_TLS_CA`, `GRPC_TLS_CERT`, `GRPC_TLS_KEY`), injected into containers at startup
 - **CloudWatch Logs** — container stdout/stderr streamed to `/ecs/realworld` (30 day retention)
 - **CloudWatch Alarms + SNS** — email alerts for ECS CPU/memory, RDS CPU/connections, and ALB 5xx error rate
 
@@ -157,7 +159,7 @@ This will:
 
 ## Running the gRPC integration tests
 
-**Prerequisites:** Docker, Go 1.21+
+**Prerequisites:** Docker, Go 1.21+, and the dev TLS certificates (see below).
 
 ```bash
 make int-tests-grpc
@@ -183,6 +185,33 @@ The suite covers all gRPC endpoints across ten test files:
 | `pagination_test.go` | Limit/offset combinations, empty page total count, most-recent-first order |
 | `errors_test.go` | Missing fields, duplicates, wrong password, `NotFound`, `PermissionDenied`, `Unauthenticated` |
 | `streaming_test.go` | `LiveArticleFeed` (auth required, filters to followed authors); `LiveCommentFeed` authenticated (`following: true` for followed authors) and unauthenticated (`following: false`), plus per-slug isolation |
+
+### Generating dev TLS certificates
+
+The gRPC server requires mTLS. Self-signed certificates for local development are committed to `certs/` (public certs only — private keys are in `.gitignore`). If you need to regenerate them, run the following from the repo root:
+
+```bash
+# CA
+openssl genrsa -out certs/ca.key 4096
+openssl req -new -x509 -days 3650 -key certs/ca.key -out certs/ca.crt -subj "/CN=dev-ca"
+
+# Server (SAN required — Go 1.15+ rejects CN-only certs)
+openssl genrsa -out certs/server.key 4096
+openssl req -new -key certs/server.key -out certs/server.csr -subj "/CN=localhost"
+openssl x509 -req -days 825 -in certs/server.csr \
+  -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
+  -extfile <(printf "subjectAltName=DNS:localhost,IP:127.0.0.1") \
+  -out certs/server.crt
+
+# Client
+openssl genrsa -out certs/client.key 4096
+openssl req -new -key certs/client.key -out certs/client.csr -subj "/CN=dev-client"
+openssl x509 -req -days 825 -in certs/client.csr \
+  -CA certs/ca.crt -CAkey certs/ca.key -CAcreateserial \
+  -out certs/client.crt
+```
+
+These certs are for local development only. They are self-signed and trusted only within this dev environment. In production, TLS is handled at the AWS infrastructure layer using certificates managed outside the codebase.
 
 ### Why Go instead of shell scripts or Bruno
 

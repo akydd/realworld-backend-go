@@ -14,3 +14,8 @@ override.tf.json
 
 # Built binary
 server
+
+# Certificates
+certs/*.key
+certs/*.csr
+certs/ca.srl
