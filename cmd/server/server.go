@@ -1,6 +1,8 @@
 package main
 
 import (
+	"crypto/tls"
+	"crypto/x509"
 	"flag"
 	"log"
 	"net"
@@ -14,6 +16,7 @@ import (
 
 	"github.com/joho/godotenv"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/health"
 )
 
@@ -79,7 +82,12 @@ func main() {
 		pb.ArticleService_LiveArticleFeed_FullMethodName: igrpc.MandatoryAuth,
 		pb.CommentService_LiveCommentFeed_FullMethodName: igrpc.OptionalAuth,
 	}
+
+	// creds for mTLS
+	creds := setupTLSCreds()
+
 	grpcServer := grpc.NewServer(
+		grpc.Creds(creds),
 		grpc.UnaryInterceptor(igrpc.AuthInterceptor(jwtSecret, authMethods)),
 		grpc.StreamInterceptor(igrpc.StreamAuthInterceptor(jwtSecret, streamAuthMethods)),
 	)
@@ -107,4 +115,40 @@ func main() {
 	}()
 
 	s.Start()
+}
+
+func setupTLSCreds() credentials.TransportCredentials {
+	certPEM, err := os.ReadFile(os.Getenv("GRPC_TLS_CERT"))
+	if err != nil {
+		log.Fatalf("error loading cert PEM: %v", err)
+	}
+
+	keyPEM, err := os.ReadFile(os.Getenv("GRPC_TLS_KEY"))
+	if err != nil {
+		log.Fatalf("error loading key PEM: %v", err)
+	}
+
+	caPEM, err := os.ReadFile(os.Getenv("GRPC_TLS_CA"))
+	if err != nil {
+		log.Fatalf("error loading CA PEM: %v", err)
+	}
+
+	serverCert, err := tls.X509KeyPair(certPEM, keyPEM)
+	if err != nil {
+		log.Fatalf("could not load x509 key pair: %v", err)
+	}
+
+	certPool := x509.NewCertPool()
+	if !certPool.AppendCertsFromPEM(caPEM) {
+		log.Fatalf("Failed to append CA certificate to pool")
+
+	}
+	tlsConfig := tls.Config{
+		Certificates: []tls.Certificate{serverCert},
+		ClientAuth:   tls.RequireAndVerifyClientCert,
+		ClientCAs:    certPool,
+		MinVersion:   tls.VersionTLS13,
+	}
+	creds := credentials.NewTLS(&tlsConfig)
+	return creds
 }
